@@ -1,23 +1,26 @@
-# README 截图清单（v1.2.8）
+# README / 飞牛帖配图说明（v1.2.9）
 
-## 已收入（自述中已引用）
+发帖或更新 README 时，优先使用下列实机图（按新人阅读顺序：下载 → 标签 → 其它）。
 
-| 文件名 | 内容 |
-|--------|------|
-| `preview-clip-dialog-v1.2.8.png` | 试听片段弹窗 |
-| `player-preview-notice-v1.2.8.png` | 底栏试听提示 |
-| `backup-v1.2.8.png` | 备份与迁移 |
-| `player-sleep-v1.2.8.png` | 睡眠定时倒计时 |
-| `library-duplicates-v1.2.8.png` | 查重弹窗（建议补拍「删除文件」按钮后替换） |
-| `library-v1.2.5.png` / `search.png` / `fullscreen.png` 等 | 旧版主界面图 |
+## 当前保留
 
-## 仍缺（可选，有则更完整）
+| 文件 | 用途 |
+|------|------|
+| `search-v1.2.9.png` | 搜索 |
+| `discover-v1.2.9.png` | 发现 |
+| `download-v1.2.9.png` | 下载管理 |
+| `tag-editor-v1.2.9.png` | 标签编辑 |
+| `tag-manual-check-v1.2.9.png` | 手动检测 |
+| `source-health-v1.2.9.png` | 音源管理 / 并发 |
+| `preview-clip-dialog-v1.2.9.png` | 试听片段弹窗 |
+| `preview-switched-v1.2.9.png` | 已切换完整播放 |
+| `fullscreen-v1.2.9.png` | 全屏播放 |
+| `library-v1.2.9.png` | 音乐库 |
+| `paths-v1.2.9.png` | 文件路径 |
+| `appearance-v1.2.9.png` | 风格样式 |
+| `library-duplicates-v1.2.8.png` | 查重 |
+| `backup-v1.2.8.png` | 账号备份 |
+| `player-sleep-v1.2.8.png` | 睡眠定时 |
+| `search-mobile.png` | 手机搜索 |
 
-| 文件名 | 拍什么 |
-|--------|--------|
-| `source-health-v1.2.8.png` | 设置 → 音源管理，「多为试听 / 部分平台试听」+ 平台小标签 |
-| `download-filter-v1.2.8.png` | 下载页筛选 +「重试试听失败」或「试听时长」失败文案 |
-| `player-platform-v1.2.8.png` | 底栏歌名旁平台徽章（酷我 / QQ音乐 等） |
-| `tag-editor-cover-v1.2.8.png` | 标签列表封面缩略图 |
-
-补齐后把 PNG 放入 `docs/screenshots/` 即可，文件名与上表一致。
+旧版截图（v1.2.5 / 无版本号桌面图等）已删除，请勿再引用。
