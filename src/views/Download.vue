@@ -18,6 +18,12 @@
         :disabled="retryingFailed"
         @click="retryAllFailed"
       >{{ retryingFailed ? '重试中…' : `重试失败 (${failedCount})` }}</button>
+      <button
+        v-if="previewFailCount"
+        class="btn-ghost btn-sm"
+        :disabled="retryingFailed"
+        @click="retryPreviewFails"
+      >重试试听失败 ({{ previewFailCount }})</button>
       <button class="btn-ghost btn-sm" @click="clearCompleted">清除已完成</button>
       <button class="btn-ghost btn-sm" @click="dismissAll" :disabled="!tasks.length">清理全部列表</button>
       <button class="btn-primary btn-sm" @click="playAllPlayable" :disabled="!playableTasks.length">试听全部</button>
@@ -50,17 +56,30 @@
       <span class="c-warning" v-if="countByStatus('paused')">已暂停 {{ countByStatus('paused') }}</span>
       <span class="sep" v-if="countByStatus('error') || countByStatus('await_confirm') || countByStatus('await_source') || countByStatus('await_exist')">|</span>
       <span class="c-error" v-if="countByStatus('error')">失败 {{ countByStatus('error') }}</span>
+      <span class="sep" v-if="previewFailCount">|</span>
+      <span class="c-warning" v-if="previewFailCount">试听片段 {{ previewFailCount }}</span>
       <span class="sep" v-if="countByStatus('error') && (countByStatus('await_confirm') || countByStatus('await_source') || countByStatus('await_exist'))">|</span>
       <span class="c-warning" v-if="countByStatus('await_confirm')">待确认降质 {{ countByStatus('await_confirm') }}</span>
       <span class="sep" v-if="countByStatus('await_confirm') && (countByStatus('await_source') || countByStatus('await_exist'))">|</span>
       <span class="c-warning" v-if="countByStatus('await_source')">待切换音源 {{ countByStatus('await_source') }}</span>
       <span class="sep" v-if="countByStatus('await_source') && countByStatus('await_exist')">|</span>
-      <span class="c-error" v-if="countByStatus('await_exist')">同名失败 {{ countByStatus('await_exist') }}</span>
+      <span class="c-warning" v-if="countByStatus('await_exist')">同名待处理 {{ countByStatus('await_exist') }}</span>
     </div>
 
-    <div class="task-list card" v-if="tasks.length">
+    <div v-if="tasks.length" class="filter-bar">
+      <button
+        v-for="opt in statusFilterOptions"
+        :key="opt.value"
+        type="button"
+        class="btn-ghost btn-sm filter-chip"
+        :class="{ active: statusFilter === opt.value }"
+        @click="statusFilter = opt.value"
+      >{{ opt.label }}</button>
+    </div>
+
+    <div class="task-list card" v-if="filteredTasks.length">
       <div
-        v-for="task in tasks"
+        v-for="task in filteredTasks"
         :key="task.id"
         class="task-item"
         :class="{ playing: isPlayingTask(task), selected: isSelected(task.id) }"
@@ -73,7 +92,7 @@
           <div class="task-meta">{{ task.singer }} · {{ task.quality }} · {{ statusText(task.status) }}</div>
           <div
             class="task-error"
-            :class="{ warn: task.status === 'await_confirm' || task.status === 'await_source', errorish: task.status === 'await_exist' }"
+            :class="{ warn: task.status === 'await_confirm' || task.status === 'await_source' || task.status === 'await_exist', errorish: task.status === 'error' }"
             v-if="task.status === 'error' || task.status === 'await_confirm' || task.status === 'await_source' || task.status === 'await_exist'"
           >
             <span class="task-error-text">{{ formatTaskError(task) }}</span>
@@ -158,6 +177,7 @@
       </div>
     </div>
 
+    <div v-else-if="tasks.length" class="empty">当前筛选无任务</div>
     <div v-else class="empty">暂无下载任务</div>
 
     <div v-if="toast" class="toast" :class="toast.type">{{ toast.text }}</div>
@@ -194,6 +214,31 @@ const selectedActiveCount = computed(() => selectedTasks.value.filter(canPause).
 const selectedDeletableCount = computed(() => selectedTasks.value.filter(t => t.file_path).length)
 const selectedRetryableCount = computed(() => selectedTasks.value.filter(canRetry).length)
 const failedCount = computed(() => tasks.value.filter(t => t.status === 'error').length)
+const previewFailCount = computed(() => tasks.value.filter(isPreviewFail).length)
+const statusFilter = ref('all')
+const statusFilterOptions = [
+  { value: 'all', label: '全部' },
+  { value: 'downloading', label: '下载中' },
+  { value: 'waiting', label: '等待' },
+  { value: 'error', label: '失败' },
+  { value: 'preview', label: '试听失败' },
+  { value: 'await', label: '待处理' },
+  { value: 'completed', label: '已完成' },
+]
+const filteredTasks = computed(() => {
+  const list = tasks.value
+  const f = statusFilter.value
+  if (f === 'all') return list
+  if (f === 'preview') return list.filter(isPreviewFail)
+  if (f === 'await') return list.filter((t) => ['await_confirm', 'await_source', 'await_exist'].includes(t.status))
+  return list.filter((t) => t.status === f)
+})
+
+function isPreviewFail(task) {
+  if (task.status !== 'error') return false
+  const msg = String(task.error || task.meta?.downgradeOffer?.reason || '')
+  return /试听时长|试听片段|仅支持试听|PREVIEW_CLIP|时长不完整/i.test(msg)
+}
 
 const unsubs = []
 const progressPending = new Map()
@@ -426,10 +471,14 @@ function formatTaskError(task) {
   if (task.status === 'await_exist' && exist) {
     return `本地已有「${exist.fileName || '同名文件'}」（${exist.localLabel || '未知音质'}），当前要下 ${exist.requestedLabel || task.quality}`
   }
-  return formatUserError(
-    task.error || task.meta?.downgradeOffer?.reason || task.meta?.sourceFallbackOffer?.reason,
-    '下载失败，请稍后重试',
-  )
+  const raw = task.error || task.meta?.downgradeOffer?.reason || task.meta?.sourceFallbackOffer?.reason
+  const text = formatUserError(raw, '下载失败，请稍后重试')
+  if (isPreviewFail(task) || /试听时长|试听片段|仅支持试听/i.test(String(raw || ''))) {
+    return `试听片段：${text}`
+  }
+  if (task.status === 'await_confirm') return `音质降级：${text}`
+  if (task.status === 'await_source') return `建议换源：${text}`
+  return text
 }
 
 function sourceFallbackAlternatives(task) {
@@ -467,12 +516,12 @@ function statusText(s) {
     error: '失败',
     await_confirm: '待确认降质',
     await_source: '待切换音源',
-    await_exist: '下载失败（同名）',
+    await_exist: '待处理同名',
   }
   return m[s] || s
 }
 function statusIcon(s) {
-  const m = { completed: '✓', paused: '⏸', waiting: '⏳', error: '✕', await_confirm: '?', await_source: '↪', await_exist: '✕' }
+  const m = { completed: '✓', paused: '⏸', waiting: '⏳', error: '✕', await_confirm: '?', await_source: '↪', await_exist: '!' }
   return m[s] || ''
 }
 
@@ -550,6 +599,25 @@ async function retryAllFailed() {
     }
     await loadList()
     showToast(ok ? `已重试 ${ok} 个失败任务` : '重试失败', ok ? 'success' : 'error')
+  } finally {
+    retryingFailed.value = false
+  }
+}
+
+async function retryPreviewFails() {
+  const failed = tasks.value.filter(isPreviewFail)
+  if (!failed.length || retryingFailed.value) return
+  retryingFailed.value = true
+  let ok = 0
+  try {
+    for (const task of failed) {
+      try {
+        await api.download.resume(task.id)
+        ok++
+      } catch {}
+    }
+    await loadList()
+    showToast(ok ? `已重试 ${ok} 个试听失败任务` : '重试失败', ok ? 'success' : 'error')
   } finally {
     retryingFailed.value = false
   }
@@ -786,6 +854,18 @@ function showToast(text, type = 'info') {
   gap: 8px;
   padding: 14px 18px;
   flex-wrap: wrap;
+  align-items: center;
+}
+.filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.filter-chip.active {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-muted);
 }
 .sep { color: var(--border); }
 .c-success { color: var(--success); }
@@ -840,7 +920,7 @@ function showToast(text, type = 'info') {
 .task-error-retry:disabled { opacity: 0.6; cursor: not-allowed; }
 .status-await_confirm,
 .status-await_source { color: var(--warning); }
-.status-await_exist { color: var(--error); }
+.status-await_exist { color: var(--warning, var(--accent)); }
 
 .task-progress {
   width: 140px;

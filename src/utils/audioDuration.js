@@ -28,36 +28,44 @@ export function detectPreviewClip(actualSec, expectedSec, opts = {}) {
   const expected = Number(expectedSec) || 0
   if (actual <= 0) return null
 
-  if (expected >= 90) {
-    if (actual <= 60 && actual < expected * 0.45) {
-      return {
-        isPreview: true,
-        actualSec: Math.max(1, Math.round(actual)),
-        expectedSec: Math.round(expected),
+  const forDownload = Boolean(opts.forDownload || opts.absoluteShort)
+
+  if (expected >= 45) {
+    const ratio = actual / expected
+    const shortfall = expected - actual
+
+    if (forDownload) {
+      if (shortfall >= 30 && ratio < 0.65) {
+        return pack(actual, expected)
       }
-    }
-  } else if (expected >= 60) {
-    if (actual <= 40 && actual < expected * 0.5) {
-      return {
-        isPreview: true,
-        actualSec: Math.max(1, Math.round(actual)),
-        expectedSec: Math.round(expected),
+      if (expected >= 120 && actual <= 95 && ratio < 0.55) {
+        return pack(actual, expected)
       }
+    } else {
+      if (shortfall >= 25 && ratio < 0.55) return pack(actual, expected)
+      if (expected >= 90 && actual <= 70 && ratio < 0.5) return pack(actual, expected)
     }
   }
 
-  // 音源给出的总时长本身只有十多秒（试听源常见）
-  if (opts.absoluteShort !== false && actual > 0 && actual <= 35) {
+  if (forDownload && actual > 0 && actual <= 50) {
+    if (!expected || expected <= 55 || actual < expected * 0.55) {
+      return pack(actual, expected)
+    }
+  } else if (opts.absoluteShort !== false && actual > 0 && actual <= 35) {
     if (!expected || expected <= 45 || actual < expected * 0.5) {
-      return {
-        isPreview: true,
-        actualSec: Math.max(1, Math.round(actual)),
-        expectedSec: expected > 0 ? Math.round(expected) : 0,
-      }
+      return pack(actual, expected)
     }
   }
 
   return null
+}
+
+function pack(actual, expected) {
+  return {
+    isPreview: true,
+    actualSec: Math.max(1, Math.round(actual)),
+    expectedSec: expected > 0 ? Math.round(expected) : 0,
+  }
 }
 
 export function formatPreviewClipMessage(info) {

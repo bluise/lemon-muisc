@@ -14,9 +14,16 @@ tools/fnpack.exe
 tools/regctl.exe
 .env
 .env.*
+!.env.example
 *.log
 .DS_Store
 Thumbs.db
+server/telemetry.local.json
+config/telemetry.local.json
+tools/lemon-telemetry-php/config.php
+tools/lemon-telemetry-php/data/*.sqlite
+tools/lemon-telemetry-php/data/*.sqlite3
+
 *.sqlite
 *.sqlite3
 *.db

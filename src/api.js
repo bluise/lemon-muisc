@@ -138,6 +138,18 @@ export const api = {
     deleteFault: () => request('/source/fault/delete', { method: 'POST' }),
     dismissFault: () => request('/source/fault/dismiss', { method: 'POST' }),
     reimportFault: () => request('/source/fault/reimport', { method: 'POST' }),
+    reportHealth: (sourceId, isPreview, platform = '') => request('/source/health/report', {
+      method: 'POST',
+      body: { sourceId, isPreview: Boolean(isPreview), platform },
+    }),
+    dismissHealth: (sourceId) => request('/source/health/dismiss', {
+      method: 'POST',
+      body: { sourceId },
+    }),
+    clearHealth: (sourceId) => request('/source/health/clear', {
+      method: 'POST',
+      body: { sourceId },
+    }),
     request: (source, action, info) => request('/source/request', { method: 'POST', body: { source, action, info } }),
   },
   search: {
@@ -250,6 +262,20 @@ export const api = {
         body: data,
       }),
     },
+    duplicates: () => request('/library/duplicates', { timeout: 60000 }),
+    deleteFiles: (filePaths) => request('/library/delete-files', {
+      method: 'POST',
+      body: { filePaths: Array.isArray(filePaths) ? filePaths : [filePaths] },
+      timeout: 60000,
+    }),
+  },
+  backup: {
+    export: () => request('/backup/export', { timeout: 60000 }),
+    import: (payload, mode = 'replace') => request('/backup/import', {
+      method: 'POST',
+      body: { ...payload, mode },
+      timeout: 60000,
+    }),
   },
   tag: {
     dirs: {

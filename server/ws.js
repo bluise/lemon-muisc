@@ -34,3 +34,12 @@ export function broadcast(type, data, userId = null) {
 export function broadcastAll(type, data) {
   broadcast(type, data, null)
 }
+
+/** Number of open authenticated WebSocket clients (browser sessions). */
+export function getOnlineClientCount() {
+  let n = 0
+  for (const ws of clients) {
+    if (ws.readyState === 1) n += 1
+  }
+  return n
+}

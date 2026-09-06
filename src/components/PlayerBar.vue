@@ -52,7 +52,10 @@
         </div>
       </div>
       <div class="player-info">
-        <span class="player-name">{{ currentPlaying ? `${cleanText(currentPlaying.name)} - ${formatArtists(currentPlaying.singer)}` : '未选择歌曲' }}</span>
+        <span class="player-name">
+          {{ currentPlaying ? `${cleanText(currentPlaying.name)} - ${formatArtists(currentPlaying.singer)}` : '未选择歌曲' }}
+          <em v-if="currentPlaying && currentPlayPlatformLabel" class="player-platform">{{ currentPlayPlatformLabel }}</em>
+        </span>
         <span class="player-lyric" :class="{ empty: currentPlaying && !currentLyricText && !playerError && !playerNotice, error: !!playerError, notice: !playerError && !!playerNotice }">
           {{ playerError || playerNotice || (currentPlaying ? (currentLyricText || '暂无歌词') : '未知艺术家') }}
         </span>
@@ -102,6 +105,20 @@
         <input type="range" min="0" :max="displayDuration || 1" :value="currentTime" @input="onSeek" class="progress-slider" />
         <span class="time-display">{{ fmtTime(currentTime) }} / {{ fmtTime(displayDuration) }}</span>
       </div>
+      <button
+        v-if="currentPlaying"
+        class="ctrl-btn ctrl-sleep"
+        type="button"
+        :class="{ active: sleepTimerMinutes > 0 }"
+        :title="sleepTimerMinutes ? `睡眠定时剩余 ${sleepTimerLeftLabel || sleepTimerMinutes + 'm'}（再点切换）` : '睡眠定时：15/30/45/60/90 分钟'"
+        @click="cycleSleepTimer"
+      >
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"/>
+        </svg>
+        <span v-if="sleepTimerMinutes" class="sleep-left">{{ sleepTimerLeftLabel || `${sleepTimerMinutes}m` }}</span>
+        <span v-else class="sleep-hint">定时</span>
+      </button>
       <button
         v-if="currentPlaying"
         class="ctrl-btn ctrl-fav"
@@ -228,6 +245,8 @@ import {
   currentPlaying, isPaused, isBuffering, currentTime, displayDuration, volume, isMuted,
   coverUrl, coverStyle, currentLyricText, visualizerEnabled, showFullscreenPlayer,
   playQueue, currentQueueIndex, playMode, playModeLabel, showQueuePanel, playerError, playerNotice,
+  sleepTimerMinutes, sleepTimerLeftLabel, setSleepTimer, clearSleepTimer,
+  currentPlayPlatformLabel,
   togglePause, stopPlay, seekTo, setVolume, toggleMute, fmtTime, initPlayer,
   playNext, playPrev, togglePlayMode, resumeOrTogglePause, unlockAudioFromGesture,
   removeFromQueue, clearQueue, playTrackAt, openFullscreenPlayer,
@@ -287,6 +306,15 @@ function onToggleFavorite() {
     source: currentPlaying.value.source,
     localPath: currentPlaying.value.localPath,
   })
+}
+
+const SLEEP_STEPS = [0, 15, 30, 45, 60, 90]
+function cycleSleepTimer() {
+  const cur = sleepTimerMinutes.value || 0
+  const idx = SLEEP_STEPS.indexOf(cur)
+  const next = SLEEP_STEPS[(idx + 1) % SLEEP_STEPS.length]
+  if (!next) clearSleepTimer({ silent: false })
+  else setSleepTimer(next)
 }
 
 function onToggleQueueFavorite(item, source) {
@@ -573,6 +601,19 @@ async function onQueuePlayClick(index) {
   white-space: nowrap;
   line-height: 1.4;
 }
+.player-platform {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 500;
+  vertical-align: 1px;
+  color: var(--accent);
+  background: var(--accent-muted);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+}
 .player-lyric {
   display: block;
   font-size: 12px;
@@ -660,6 +701,29 @@ async function onQueuePlayClick(index) {
   align-items: center;
   justify-content: center;
   color: var(--text-muted);
+}
+.ctrl-sleep {
+  width: auto;
+  min-width: 34px;
+  height: 34px;
+  padding: 0 8px;
+  gap: 4px;
+  border-radius: var(--radius);
+  background: transparent;
+  border: 1px solid var(--border);
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+.ctrl-sleep .sleep-left { font-variant-numeric: tabular-nums; }
+.ctrl-sleep .sleep-hint { font-size: 11px; opacity: 0.85; }
+.ctrl-sleep:hover, .ctrl-sleep.active {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-muted);
 }
 .ctrl-fav svg {
   display: block;

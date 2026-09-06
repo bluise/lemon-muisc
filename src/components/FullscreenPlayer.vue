@@ -58,7 +58,10 @@
             </div>
             <div class="fs-meta">
               <div class="fs-title">{{ cleanText(currentPlaying?.name) || '未知歌曲' }}</div>
-              <div class="fs-artist">{{ formatArtists(currentPlaying?.singer) || '未知艺术家' }}</div>
+              <div class="fs-artist">
+                {{ formatArtists(currentPlaying?.singer) || '未知艺术家' }}
+                <em v-if="currentPlayPlatformLabel" class="fs-platform">{{ currentPlayPlatformLabel }}</em>
+              </div>
               <div v-if="playerError" class="fs-error">{{ playerError }}</div>
             </div>
           </div>
@@ -230,6 +233,7 @@ import {
   currentPlaying, isPaused, isBuffering, currentTime, displayDuration, coverUrl, coverStyle,
   lyricLines, activeLyricIdx, playQueue, currentQueueIndex, playMode, playModeLabel,
   showFullscreenPlayer, visualizerEnabled, volume, isMuted, playerError,
+  currentPlayPlatformLabel,
   togglePause, seekTo, setVolume, toggleMute, fmtTime, playNext, playPrev, togglePlayMode,
   closeFullscreenPlayer, showQueuePanel, playTrackAt, removeFromQueue, clearQueue,
   resumeOrTogglePause, unlockAudioFromGesture, currentLocalTrackPath, tryFillCoverFromNetwork,
@@ -448,6 +452,13 @@ watch(activeLyricIdx, async () => {
   scrollActiveLyric()
 })
 
+watch(lyricLines, async () => {
+  lyricLineEls.value = []
+  if (!showFullscreenPlayer.value) return
+  await nextTick()
+  scrollActiveLyric()
+})
+
 watch(showFullscreenPlayer, async (open) => {
   document.body.style.overflow = open ? 'hidden' : ''
   document.documentElement.classList.toggle('player-fs-open', open)
@@ -460,10 +471,6 @@ watch(showFullscreenPlayer, async (open) => {
   mobileScreenExpanded.value = false
   document.documentElement.classList.remove('player-fs-open')
   await exitNativeFullscreen()
-})
-
-watch(lyricLines, () => {
-  lyricLineEls.value = []
 })
 
 onMounted(() => {
@@ -624,6 +631,20 @@ onUnmounted(() => {
 .fs-artist {
   font-size: 14px;
   color: rgba(255, 255, 255, 0.65);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.fs-platform {
+  font-style: normal;
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  color: #9fdfff;
+  background: rgba(64, 180, 255, 0.16);
+  border: 1px solid rgba(120, 200, 255, 0.35);
 }
 .fs-error {
   margin-top: 8px;

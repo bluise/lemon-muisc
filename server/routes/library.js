@@ -1,9 +1,12 @@
 import { Router } from 'express'
-import { getMusicPaths } from '../utils/filePaths.js'
+import fs from 'node:fs'
+import path from 'node:path'
+import { getMusicPaths, isAllowedMediaPath } from '../utils/filePaths.js'
 import {
   getAllCachedTracks,
   syncLibraryIndex,
   scanBatchAndCache,
+  removeCachePaths,
 } from '../utils/libraryCache.js'
 import {
   getLibraryScanStatus,
@@ -116,6 +119,90 @@ libraryRouter.post('/scan-batch', async (req, res) => {
     }
     const data = await scanBatchAndCache(files)
     res.json({ ok: true, data })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+/** 检测重复曲目（同标题+歌手，忽略大小写与空白） */
+libraryRouter.get('/duplicates', (_req, res) => {
+  try {
+    const tracks = getAllCachedTracks() || []
+    const groups = new Map()
+    for (const t of tracks) {
+      const title = String(t.title || t.parsedTitle || '').trim().toLowerCase()
+      const artist = String(t.artist || t.parsedArtist || '').trim().toLowerCase()
+      if (!title) continue
+      const key = `${title}\n${artist}`
+      if (!groups.has(key)) groups.set(key, [])
+      groups.get(key).push({
+        filePath: t.filePath,
+        fileName: t.fileName,
+        title: t.title || t.parsedTitle || '',
+        artist: t.artist || t.parsedArtist || '',
+        album: t.album || '',
+        duration: t.duration || 0,
+        bitrate: t.bitrate || 0,
+      })
+    }
+    const duplicates = [...groups.values()]
+      .filter((g) => g.length > 1)
+      .map((files) => ({
+        title: files[0].title,
+        artist: files[0].artist,
+        count: files.length,
+        files,
+      }))
+      .sort((a, b) => b.count - a.count)
+    res.json({
+      ok: true,
+      data: {
+        groupCount: duplicates.length,
+        fileCount: duplicates.reduce((n, g) => n + g.count, 0),
+        groups: duplicates.slice(0, 200),
+      },
+    })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+/** 物理删除音乐库内文件（仅允许音乐库/下载目录下的文件） */
+libraryRouter.post('/delete-files', (req, res) => {
+  try {
+    const raw = req.body?.filePaths ?? req.body?.paths ?? req.body?.filePath
+    const list = Array.isArray(raw) ? raw : (raw ? [raw] : [])
+    const filePaths = [...new Set(list.map((p) => String(p || '').trim()).filter(Boolean))]
+    if (!filePaths.length) return res.status(400).json({ error: '请指定要删除的文件' })
+    if (filePaths.length > 50) return res.status(400).json({ error: '单次最多删除 50 个文件' })
+
+    const deleted = []
+    const failed = []
+    for (const filePath of filePaths) {
+      try {
+        if (!isAllowedMediaPath(filePath)) {
+          failed.push({ filePath, error: '路径不在允许的音乐库/下载目录内' })
+          continue
+        }
+        const resolved = path.resolve(filePath)
+        fs.unlinkSync(resolved)
+        deleted.push(resolved)
+      } catch (e) {
+        failed.push({ filePath, error: e.message || '删除失败' })
+      }
+    }
+
+    if (deleted.length) {
+      removeCachePaths(deleted)
+      notifyLibraryRemoved(deleted, { reason: 'manual-delete' })
+    }
+
+    res.json({
+      ok: true,
+      deleted: deleted.length,
+      failed: failed.length,
+      data: { deleted, failed },
+    })
   } catch (e) {
     res.status(500).json({ error: e.message })
   }

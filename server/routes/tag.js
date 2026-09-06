@@ -165,7 +165,8 @@ tagRouter.post('/write', async (req, res) => {
     notifyLibraryChanged([filePath], { reason: 'tag-write' })
     res.json({ ok: true })
   } catch (e) {
-    res.status(500).json({ error: e.message })
+    console.error('[tag/write]', e.message)
+    res.status(500).json({ error: e.message || '标签写入失败' })
   }
 })
 

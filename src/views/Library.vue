@@ -13,6 +13,9 @@
       <button type="button" class="btn-ghost btn-sm" :disabled="libraryScanning" @click="refreshLibrary">
         {{ scanButtonLabel }}
       </button>
+      <button type="button" class="btn-ghost btn-sm" :disabled="dupScanning" @click="scanDuplicates">
+        {{ dupScanning ? '查重中…' : '查重' }}
+      </button>
       <button type="button" class="btn-primary btn-sm" @click="openCreatePlaylist">创建歌单</button>
     </div>
     <div v-if="scanSummary || showScanStatus" class="library-scan-summary">
@@ -281,6 +284,42 @@
       @close="pickPlaylistTrack = null"
       @added="onAddedToPlaylist"
     />
+
+    <div v-if="showDupModal" class="modal-overlay" @click.self="showDupModal = false">
+      <div class="modal-card dup-modal">
+        <div class="dup-modal-head">
+          <h4 class="modal-title">重复曲目</h4>
+          <button type="button" class="btn-ghost btn-sm" @click="showDupModal = false">关闭</button>
+        </div>
+        <p class="dup-summary">
+          共 {{ dupResult.groupCount || 0 }} 组、{{ dupResult.fileCount || 0 }} 个文件（同标题+歌手）
+        </p>
+        <div v-if="!(dupResult.groups || []).length" class="dup-empty">未发现重复曲目</div>
+        <div v-else class="dup-list">
+          <div v-for="(g, gi) in dupResult.groups" :key="gi" class="dup-group">
+            <div class="dup-group-title">
+              <strong>{{ g.title || '未知标题' }}</strong>
+              <span>{{ g.artist || '未知歌手' }}</span>
+              <span class="dup-count">{{ g.count }} 份</span>
+            </div>
+            <ul class="dup-files">
+              <li v-for="(f, fi) in g.files" :key="fi">
+                <code :title="f.filePath">{{ f.fileName || f.filePath }}</code>
+                <span v-if="f.bitrate" class="dup-meta">{{ Math.round(f.bitrate / 1000) }}kbps</span>
+                <button type="button" class="btn-ghost btn-sm" @click="copyDupPath(f.filePath)">复制路径</button>
+                <button
+                  type="button"
+                  class="btn-ghost btn-sm btn-danger-hover"
+                  :disabled="dupDeletingPath === f.filePath || g.files.length <= 1"
+                  :title="g.files.length <= 1 ? '请至少保留一份' : '从磁盘永久删除'"
+                  @click="deleteDupFile(g, f)"
+                >{{ dupDeletingPath === f.filePath ? '删除中…' : '删除文件' }}</button>
+              </li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -328,6 +367,10 @@ function toggleRowActions(key) {
 const tappingSongKey = ref('')
 const coverPendingPauseKey = ref('')
 const toast = ref(null)
+const dupScanning = ref(false)
+const showDupModal = ref(false)
+const dupResult = ref({ groupCount: 0, fileCount: 0, groups: [] })
+const dupDeletingPath = ref('')
 const loadProgress = libraryLoadProgress
 const songColumns = computed(() => librarySongColumns.value)
 const scanButtonLabel = computed(() => {
@@ -669,6 +712,76 @@ function openCreatePlaylist() {
 function showToast(text, type = 'info') {
   toast.value = { text, type }
   setTimeout(() => { toast.value = null }, 2800)
+}
+
+async function scanDuplicates() {
+  if (dupScanning.value) return
+  dupScanning.value = true
+  try {
+    const res = await api.library.duplicates()
+    dupResult.value = res?.data || { groupCount: 0, fileCount: 0, groups: [] }
+    showDupModal.value = true
+    if (!(dupResult.value.groupCount > 0)) showToast('未发现重复曲目', 'info')
+  } catch (e) {
+    showToast(e.message || '查重失败', 'error')
+  } finally {
+    dupScanning.value = false
+  }
+}
+
+async function copyDupPath(filePath) {
+  try {
+    await navigator.clipboard.writeText(filePath || '')
+    showToast('路径已复制', 'success')
+  } catch {
+    showToast(filePath || '无路径', 'info')
+  }
+}
+
+function pruneDupResult() {
+  const groups = (dupResult.value.groups || [])
+    .map((g) => ({
+      ...g,
+      files: (g.files || []).filter(Boolean),
+      count: (g.files || []).length,
+    }))
+    .filter((g) => g.files.length > 1)
+  const fileCount = groups.reduce((n, g) => n + g.files.length, 0)
+  dupResult.value = {
+    groupCount: groups.length,
+    fileCount,
+    groups,
+  }
+}
+
+async function deleteDupFile(group, file) {
+  const filePath = file?.filePath
+  if (!filePath || dupDeletingPath.value) return
+  if ((group?.files || []).length <= 1) {
+    showToast('请至少保留一份，勿删光', 'info')
+    return
+  }
+  const name = file.fileName || filePath
+  const ok = window.confirm(`确定从磁盘永久删除？\n\n${name}\n\n此操作不可恢复。`)
+  if (!ok) return
+
+  dupDeletingPath.value = filePath
+  try {
+    const res = await api.library.deleteFiles([filePath])
+    const failed = res?.data?.failed || []
+    if (failed.length) {
+      showToast(failed[0]?.error || '删除失败', 'error')
+      return
+    }
+    group.files = group.files.filter((f) => f.filePath !== filePath)
+    group.count = group.files.length
+    pruneDupResult()
+    showToast('已删除磁盘文件', 'success')
+  } catch (e) {
+    showToast(e.message || '删除失败', 'error')
+  } finally {
+    dupDeletingPath.value = ''
+  }
 }
 </script>
 
@@ -1074,6 +1187,82 @@ function showToast(text, type = 'info') {
   border: 1px solid var(--border-light);
   border-radius: 12px;
   padding: 20px;
+}
+.modal-card.dup-modal {
+  width: min(640px, 100%);
+  max-height: min(80vh, 720px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.dup-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.dup-modal .modal-title { margin: 0; }
+.dup-summary {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+.dup-empty {
+  padding: 24px 0;
+  text-align: center;
+  color: var(--text-muted);
+}
+.dup-list {
+  overflow: auto;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.dup-group-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-size: 14px;
+}
+.dup-group-title span { color: var(--text-muted); font-size: 13px; }
+.dup-count {
+  margin-left: auto;
+  color: var(--accent) !important;
+}
+.dup-files {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.dup-files li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+.dup-files code {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+.dup-meta { color: var(--text-muted); flex-shrink: 0; }
+.dup-files .btn-danger-hover:hover:not(:disabled) {
+  color: var(--error, #f56c6c);
+  border-color: var(--error, #f56c6c);
+}
+.dup-files .btn-ghost:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 .modal-card h3 { margin: 0 0 14px; }
 .modal-card input { width: 100%; margin-bottom: 14px; }

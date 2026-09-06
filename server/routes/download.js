@@ -38,6 +38,7 @@ import {
   buildExistFileOffer,
   isSameAudioBaseName,
 } from '../utils/downloadExist.js'
+import { recordSourceHealthOutcome } from '../utils/sourceHealth.js'
 
 export const downloadRouter = Router()
 
@@ -823,7 +824,7 @@ async function streamToFile(url, partPath, taskId, abort) {
 function markSourceFallbackOffer(task, meta, error) {
   const offer = buildSourceFallbackOffer(error)
   if (!offer) return false
-  cleanupTaskDownloadArtifacts(task, meta, taskSettings(task))
+  cleanupTaskDownloadArtifacts(task, meta, taskSettings(task), { onlyTracked: true })
   clearTaskStoredFilePath(task.id)
   meta.sourceFallbackOffer = {
     ...offer,
@@ -846,7 +847,7 @@ function markSourceFallbackOffer(task, meta, error) {
 
 function markAwaitConfirm(task, meta, fromQuality, toQuality, reason) {
   const friendlyReason = formatUserError(reason, '音源取链失败，请稍后重试')
-  cleanupTaskDownloadArtifacts(task, meta, taskSettings(task))
+  cleanupTaskDownloadArtifacts(task, meta, taskSettings(task), { onlyTracked: true })
   clearTaskStoredFilePath(task.id)
   meta.downloadArtifacts = []
   meta.downgradeOffer = {
@@ -876,9 +877,9 @@ function markAwaitConfirm(task, meta, fromQuality, toQuality, reason) {
 async function markAwaitExist(task, meta, offer, { deferred = false } = {}) {
   meta.existFileOffer = offer
   if (deferred) meta.deferExistAsk = true
-  // 批量场景显示为失败文案；单曲仍提示可处理
+  // 批量场景汇总处理；勿写成「下载失败」以免与真正写盘失败混淆
   const tip = deferred
-    ? `下载失败：本地已有同名文件（${offer.localLabel}），当前要下 ${offer.requestedLabel}`
+    ? `本地已有同名文件（${offer.localLabel}），当前要下 ${offer.requestedLabel}（待批量处理）`
     : `本地已有同名文件（${offer.localLabel}），可跳过或下载 ${offer.requestedLabel}`
   getDB().prepare(`
     UPDATE download_tasks SET status = 'await_exist', error = ?, meta = ?, progress = 0 WHERE id = ?
@@ -1008,7 +1009,8 @@ function markError(taskId, message, meta) {
   const row = getDB().prepare('SELECT * FROM download_tasks WHERE id = ?').get(taskId)
   const taskMeta = meta || parseTaskMeta(row)
   if (row) {
-    cleanupTaskDownloadArtifacts(row, taskMeta, taskSettings(row))
+    // 仅清理本任务已记录的写入产物与 .part，不要扫目录删掉用户已有成品文件
+    cleanupTaskDownloadArtifacts(row, taskMeta, taskSettings(row), { onlyTracked: true })
     clearTaskStoredFilePath(taskId)
   }
   taskMeta.downloadArtifacts = []
@@ -1144,14 +1146,49 @@ function collectTaskArtifactPaths(task, meta, settings, { includeVariants = true
   return [...paths]
 }
 
-function cleanupTaskDownloadArtifacts(task, meta, settings, { exceptPath } = {}) {
+function cleanupTaskDownloadArtifacts(task, meta, settings, { exceptPath, onlyTracked = false } = {}) {
   const except = new Set([exceptPath].filter(Boolean))
-  for (const filePath of collectTaskArtifactPaths(task, meta, settings)) {
-    if (except.has(filePath)) continue
-    cleanupDownloadPath(filePath)
+  if (onlyTracked) {
+    const tracked = new Set()
+    if (task?.file_path) tracked.add(task.file_path)
+    if (Array.isArray(meta?.downloadArtifacts)) {
+      for (const p of meta.downloadArtifacts) tracked.add(p)
+    }
+    for (const filePath of tracked) {
+      if (except.has(filePath)) continue
+      cleanupDownloadPath(filePath)
+    }
+    // 仍清理同名 .part，避免残留半成品
+    cleanupGroupDirPartFiles(task, settings, except)
+  } else {
+    for (const filePath of collectTaskArtifactPaths(task, meta, settings)) {
+      if (except.has(filePath)) continue
+      cleanupDownloadPath(filePath)
+    }
+    cleanupGroupDirArtifacts(task, settings, except)
   }
-  cleanupGroupDirArtifacts(task, settings, except)
   if (meta?.downloadArtifacts) meta.downloadArtifacts = []
+}
+
+function cleanupGroupDirPartFiles(task, settings, except = new Set()) {
+  const baseName = resolveTaskFileBaseName(task, settings)
+  if (!baseName) return
+  const groupDir = resolveDownloadGroupDir(taskSavePath(task), settings, task)
+  if (!fs.existsSync(groupDir)) return
+  let entries = []
+  try {
+    entries = fs.readdirSync(groupDir)
+  } catch {
+    return
+  }
+  for (const entry of entries) {
+    if (!entry.endsWith('.part')) continue
+    const partBase = entry.slice(0, -'.part'.length).replace(/\.[^.]+$/, '')
+    if (!isSameAudioBaseName(partBase || entry, baseName) && !entry.startsWith(`${baseName}.`)) continue
+    const fullPath = path.join(groupDir, entry)
+    if (except.has(fullPath)) continue
+    safeUnlink(fullPath)
+  }
 }
 
 function resolveTaskFileBaseName(task, settings) {
@@ -1243,6 +1280,7 @@ async function downloadTask(task, settings) {
 
       let filePath = ''
       let partPath = ''
+      let publishedDest = false
       try {
         if (attempt > 1) {
           dlBroadcast('download:status', {
@@ -1283,7 +1321,7 @@ async function downloadTask(task, settings) {
         const stagedPath = path.join(stagingDir, path.basename(filePath))
         partPath = partPathFor(stagedPath)
         lastAttemptPath = filePath
-        rememberDownloadArtifact(meta, filePath)
+        publishedDest = false
         saveTaskMeta(task.id, meta)
 
         fs.mkdirSync(path.dirname(filePath), { recursive: true })
@@ -1303,17 +1341,18 @@ async function downloadTask(task, settings) {
           }
         }
 
-        cleanupTaskDownloadArtifacts(task, meta, settings, { exceptPath: filePath })
+        cleanupTaskDownloadArtifacts(task, meta, settings, { exceptPath: filePath, onlyTracked: true })
 
         const expectedSec = parseDurationSeconds(
           task.interval || meta.duration || meta.interval || musicInfo.interval || musicInfo.duration,
         )
 
-        // 落盘前：用音源音频自带的总时长判断（试听源常直接标成 10～30 秒）
+        // 落盘前：用音源音频自带的总时长判断（试听源常为短片段）
         const remoteSec = await probeRemoteAudioDurationSeconds(url)
         const preErr = assertNotPreviewClip(remoteSec, expectedSec, { forDownload: true })
         if (preErr) {
           if (meta.sourceApiId) {
+            recordSourceHealthOutcome(meta.sourceApiId, true, source)
             const skipped = new Set([...(meta.skipSourceIds || []), meta.sourceApiId].filter(Boolean))
             meta.skipSourceIds = [...skipped]
             saveTaskMeta(task.id, meta)
@@ -1325,14 +1364,16 @@ async function downloadTask(task, settings) {
         await streamToFile(url, partPath, task.id, abort)
         finalizePartFile(partPath, stagedPath)
 
-        // 远程探测失败时，落盘后再校验一次（兜底）
-        if (!(remoteSec > 0)) {
+        // 落盘后必检实际文件时长（远程 Range 探测可能偏短/失败，不能只依赖它）
+        {
           const actualSec = await probeFileDurationSeconds(stagedPath)
-          const postErr = assertNotPreviewClip(actualSec, expectedSec, { forDownload: true })
+          const checkSec = actualSec > 0 ? actualSec : remoteSec
+          const postErr = assertNotPreviewClip(checkSec, expectedSec, { forDownload: true })
           if (postErr) {
             cleanupDownloadPath(stagedPath)
             cleanupStagingDir(task.id)
             if (meta.sourceApiId) {
+              recordSourceHealthOutcome(meta.sourceApiId, true, source)
               const skipped = new Set([...(meta.skipSourceIds || []), meta.sourceApiId].filter(Boolean))
               meta.skipSourceIds = [...skipped]
               saveTaskMeta(task.id, meta)
@@ -1343,8 +1384,10 @@ async function downloadTask(task, settings) {
 
         await writeMetaIfNeeded(task, meta, stagedPath, ext, settings)
         publishStagedDownload(stagedPath, filePath)
+        publishedDest = true
+        if (meta.sourceApiId) recordSourceHealthOutcome(meta.sourceApiId, false, source)
         cleanupStagingDir(task.id)
-        cleanupTaskDownloadArtifacts(task, meta, settings, { exceptPath: filePath })
+        cleanupTaskDownloadArtifacts(task, meta, settings, { exceptPath: filePath, onlyTracked: true })
         rememberDownloadArtifact(meta, filePath)
         meta.downloadArtifacts = [filePath]
         delete meta.existFileConfirmed
@@ -1359,7 +1402,8 @@ async function downloadTask(task, settings) {
       } catch (e) {
         cleanupDownloadPath(partPath)
         cleanupStagingDir(task.id)
-        if (filePath) {
+        // 仅当本轮已发布到目标路径后又失败时才删目标；未发布时绝不动用户已有成品
+        if (filePath && publishedDest) {
           cleanupDownloadPath(filePath)
           rememberDownloadArtifact(meta, filePath)
         }
@@ -1371,10 +1415,9 @@ async function downloadTask(task, settings) {
       }
     }
 
-    if (lastAttemptPath) {
-      cleanupDownloadPath(lastAttemptPath)
-      clearTaskStoredFilePath(task.id)
-    }
+    // 失败收尾：不要按路径名删除音乐库里已有成品（仅清本任务跟踪产物与 .part）
+    cleanupTaskDownloadArtifacts(task, meta, settings, { onlyTracked: true })
+    clearTaskStoredFilePath(task.id)
     cleanupStagingDir(task.id)
     const reason = lastError?.message || '下载失败'
     if (isNoActiveSourceError(lastError) || isNoActiveSourceError(reason)) {
@@ -1382,7 +1425,7 @@ async function downloadTask(task, settings) {
       return
     }
     // 各音源均为试听片段：不再降档，直接失败提示
-    if (lastError?.code === 'PREVIEW_CLIP' || /仅提供约.*试听片段|时长不完整/i.test(reason)) {
+    if (lastError?.code === 'PREVIEW_CLIP' || /试听时长|仅提供约.*试听片段|仅支持试听约|时长不完整/i.test(reason)) {
       markError(task.id, reason, meta)
       return
     }

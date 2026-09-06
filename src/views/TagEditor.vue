@@ -158,7 +158,14 @@
                 @click="openEdit(f)"
               >
                 <td @click.stop><input type="checkbox" v-model="f._selected" /></td>
-                <td class="cell-file" :title="f.filePath">{{ f.fileName }}</td>
+                <td class="cell-file" :title="f.filePath">
+                  <span class="file-cell-inner">
+                    <span class="file-cover-wrap" aria-hidden="true">
+                      <CoverArt :src="listCoverSrc(f)" loading="lazy" />
+                    </span>
+                    <span class="file-name-text">{{ f.fileName }}</span>
+                  </span>
+                </td>
                 <td class="cell-text">{{ f.title || '-' }}</td>
                 <td class="cell-text">{{ f.artist || '-' }}</td>
                 <td class="cell-text" :class="{ 'cell-missing': isTagFieldMissing(f, 'album') }">{{ f.album || '-' }}</td>
@@ -413,8 +420,10 @@ import {
 } from '../stores/tagMatch.js'
 import AppSelect from '../components/AppSelect.vue'
 import ClearableInput from '../components/ClearableInput.vue'
+import CoverArt from '../components/CoverArt.vue'
 import { collectDefaultExpandedPaths } from '../utils/dirTreeExpand.js'
 import { resolveSearchArtistTitle } from '../utils/filenameParse.js'
+import { withStreamAuth } from '../utils/streamAuth.js'
 
 const sourceOptions = [
   { value: 'tx', label: 'QQ音乐' },
@@ -1005,30 +1014,40 @@ function applyMetaToFile(f, meta) {
   if (meta.genre) f.genre = meta.genre
   if (meta.comment) f.comment = meta.comment
   if (meta.lyric) f.lyric = meta.lyric
-  if (meta.pic) f.pictureBase64 = meta.pic
-  if (meta.picUrl) f.picUrl = meta.picUrl
-  f.hasPicture = Boolean(f.pictureBase64 || f.picUrl)
+  if (meta.pic) {
+    f.pictureBase64 = meta.pic
+  }
+  if (meta.picUrl) {
+    f.picUrl = meta.picUrl
+  }
+  f.hasPicture = Boolean(f.pictureBase64 || f.picUrl || f.hasPicture)
   f.hasLyrics = Boolean(f.lyric)
   f._modified = true
 }
 
-function applyToFiles() {
+function applyToFiles({ silent = false } = {}) {
+  if (!editForm.value) return
   const meta = buildMetaFromForm()
   const targets = isBatchMode.value ? selectedFiles.value : (editingFile.value ? [editingFile.value] : [])
   if (!targets.length) return
-  targets.forEach(f => applyMetaToFile(f, meta))
-  showToast(`已更新 ${targets.length} 个文件的列表显示，尚未写入磁盘。请点击「保存到文件」按钮写入磁盘`, 'info')
+  const coverDirty = Boolean(editingFile.value?._coverDirty)
+  targets.forEach((f) => {
+    applyMetaToFile(f, meta)
+    if (coverDirty) f._coverDirty = true
+  })
+  if (!silent) {
+    showToast(`已更新 ${targets.length} 个文件的列表显示，尚未写入磁盘。请点击「保存到文件」按钮写入磁盘`, 'info')
+  }
 }
 
 async function saveCurrent() {
+  // 表单才是最新内容：必须先同步到文件行再落盘。
+  // 否则第一次保存时 _modified=true 会跳过同步，把列表里的旧标签写回磁盘。
+  if (editForm.value) applyToFiles({ silent: true })
+
   const targets = isBatchMode.value
     ? selectedFiles.value.filter(f => f._modified)
     : (editingFile.value?._modified ? [editingFile.value] : [])
-
-  if (!targets.length && editingFile.value) {
-    applyToFiles()
-    targets.push(editingFile.value)
-  }
 
   if (!targets.length) {
     showToast('没有需要保存的文件', 'info')
@@ -1037,9 +1056,8 @@ async function saveCurrent() {
 
   saving.value = true
   try {
-    const payload = targets.map(f => ({
-      filePath: f.filePath,
-      meta: {
+    const payload = targets.map(f => {
+      const meta = {
         title: f.title,
         artist: f.artist,
         album: f.album,
@@ -1047,15 +1065,33 @@ async function saveCurrent() {
         genre: f.genre,
         comment: f.comment,
         lyric: f.lyric,
-        pic: f.pictureBase64 || undefined,
-        picUrl: f.picUrl || undefined,
-      },
-    }))
+      }
+      // 仅封面有改动时才上传，避免每次带上大图导致请求失败，也避免误清封面
+      if (f._coverDirty) {
+        if (f.pictureBase64) meta.pic = f.pictureBase64
+        else if (f.picUrl) meta.picUrl = f.picUrl
+        else meta.clearPicture = true
+      }
+      return { filePath: f.filePath, meta }
+    })
     const res = await api.tag.writeBatch(payload)
-    const ok = (res.data || []).filter(r => r.ok).length
-    targets.forEach(f => { f._modified = false })
-    await refreshPlayerAfterSave(targets)
-    showToast(`已保存 ${ok}/${targets.length} 个文件`, 'success')
+    const rows = res.data || []
+    const ok = rows.filter(r => r.ok).length
+    const fail = rows.filter(r => !r.ok)
+    targets.forEach(f => {
+      if (rows.some(r => r.filePath === f.filePath && r.ok)) {
+        f._modified = false
+        f._coverDirty = false
+        f._coverRev = Date.now()
+      }
+    })
+    await refreshPlayerAfterSave(targets.filter(f => !f._modified))
+    if (fail.length) {
+      const tip = fail[0]?.error || '写入失败'
+      showToast(`已保存 ${ok}/${targets.length}，失败 ${fail.length}：${tip}`, ok ? 'info' : 'error')
+    } else {
+      showToast(`已保存 ${ok}/${targets.length} 个文件`, 'success')
+    }
   } catch (e) {
     showToast(e.message, 'error')
   } finally {
@@ -1064,13 +1100,16 @@ async function saveCurrent() {
 }
 
 async function saveAll() {
+  if (editForm.value) applyToFiles({ silent: true })
   const modified = files.value.filter(f => f._modified)
-  if (!modified.length) return
+  if (!modified.length) {
+    showToast('没有需要保存的文件', 'info')
+    return
+  }
   saving.value = true
   try {
-    const payload = modified.map(f => ({
-      filePath: f.filePath,
-      meta: {
+    const payload = modified.map(f => {
+      const meta = {
         title: f.title,
         artist: f.artist,
         album: f.album,
@@ -1078,14 +1117,32 @@ async function saveAll() {
         genre: f.genre,
         comment: f.comment,
         lyric: f.lyric,
-        pic: f.pictureBase64 || undefined,
-      },
-    }))
+      }
+      if (f._coverDirty) {
+        if (f.pictureBase64) meta.pic = f.pictureBase64
+        else if (f.picUrl) meta.picUrl = f.picUrl
+        else meta.clearPicture = true
+      }
+      return { filePath: f.filePath, meta }
+    })
     const res = await api.tag.writeBatch(payload)
-    const ok = (res.data || []).filter(r => r.ok).length
-    modified.forEach(f => { f._modified = false })
-    await refreshPlayerAfterSave(modified)
-    showToast(`已保存 ${ok}/${modified.length} 个文件`, 'success')
+    const rows = res.data || []
+    const ok = rows.filter(r => r.ok).length
+    const fail = rows.filter(r => !r.ok)
+    modified.forEach(f => {
+      if (rows.some(r => r.filePath === f.filePath && r.ok)) {
+        f._modified = false
+        f._coverDirty = false
+        f._coverRev = Date.now()
+      }
+    })
+    await refreshPlayerAfterSave(modified.filter(f => !f._modified))
+    if (fail.length) {
+      const tip = fail[0]?.error || '写入失败'
+      showToast(`已保存 ${ok}/${modified.length}，失败 ${fail.length}：${tip}`, ok ? 'info' : 'error')
+    } else {
+      showToast(`已保存 ${ok}/${modified.length} 个文件`, 'success')
+    }
   } catch (e) {
     showToast(e.message, 'error')
   } finally {
@@ -1178,6 +1235,7 @@ function applyFetchedMetaToForm(meta) {
     if (meta.pic) editForm.value.pictureBase64 = meta.pic
     else if (meta.picUrl) editForm.value.picUrl = meta.picUrl
     else if (fetchPreview.value?.picUrl) editForm.value.picUrl = fetchPreview.value.picUrl
+    if (editingFile.value) editingFile.value._coverDirty = true
   } else if (fetchIntent.value === 'lyric' && meta.lyric) {
     editForm.value.lyric = meta.lyric
   }
@@ -1188,7 +1246,13 @@ function confirmFetchApply() {
   if (!meta || !editForm.value || !canConfirmFetch.value) return
 
   applyFetchedMetaToForm(meta)
-  markModified()
+  // 同步到当前文件行，封面变更需带上 _coverDirty
+  if (editingFile.value) {
+    applyMetaToFile(editingFile.value, buildMetaFromForm())
+    if (fetchIntent.value === 'cover') editingFile.value._coverDirty = true
+  } else {
+    markModified()
+  }
   closeFetchModal()
   const toastMap = {
     cover: '已应用封面与标签信息',
@@ -1221,6 +1285,22 @@ async function refreshPlayerAfterSave(targets) {
   for (const f of targets) {
     await refreshPlayingLocalMeta(f.filePath, fileMetaForPlayerRefresh(f))
   }
+}
+
+function listCoverSrc(f) {
+  if (!f) return ''
+  if (f.pictureBase64) {
+    return String(f.pictureBase64).startsWith('data:')
+      ? f.pictureBase64
+      : `data:${f.pictureMime || 'image/jpeg'};base64,${f.pictureBase64}`
+  }
+  if (f.picUrl) return f.picUrl
+  if (f.hasPicture && f.filePath) {
+    const bust = f._coverRev || f._metaRev || ''
+    const q = bust ? `&v=${encodeURIComponent(bust)}` : ''
+    return withStreamAuth(`/api/tag/cover?path=${encodeURIComponent(f.filePath)}${q}`)
+  }
+  return ''
 }
 
 function fileToTrack(f) {
@@ -1315,6 +1395,11 @@ function onCoverUpload(e) {
   const reader = new FileReader()
   reader.onload = () => {
     editForm.value.pictureBase64 = reader.result
+    if (editingFile.value) {
+      editingFile.value.pictureBase64 = reader.result
+      editingFile.value._coverDirty = true
+      editingFile.value.hasPicture = true
+    }
     markModified()
   }
   reader.readAsDataURL(file)
@@ -1683,7 +1768,32 @@ tr.playing .play-btn {
 .spin { animation: tag-spin 0.8s linear infinite; }
 @keyframes tag-spin { to { transform: rotate(360deg); } }
 
-.cell-file { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); font-size: 12px; }
+.cell-file {
+  max-width: 220px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.file-cell-inner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.file-cover-wrap {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--bg-elevated, rgba(255, 255, 255, 0.06));
+  border: 1px solid var(--border-light, rgba(255, 255, 255, 0.08));
+}
+.file-name-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .cell-text { max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .edit-form {

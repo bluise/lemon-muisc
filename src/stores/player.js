@@ -21,6 +21,7 @@ import {
   detectPreviewClip,
   formatPreviewClipMessage,
 } from '../utils/audioDuration.js'
+import { platformLabel, PLATFORM_LABELS } from '../utils/platforms.js'
 
 export const currentPlaying = ref(null)
 export const loadingPlay = ref(null)
@@ -28,6 +29,13 @@ export const isPaused = ref(false)
 /** 点击播放后、真正开始出声前的缓冲阶段 */
 export const isBuffering = ref(false)
 export const currentTime = ref(0)
+/** 当前试听实际取链平台（kw/tx/...），本地为空 */
+export const currentPlayPlatform = ref('')
+export const currentPlayPlatformLabel = computed(() => {
+  const key = currentPlayPlatform.value
+  if (!key || key === 'local') return ''
+  return platformLabel(key)
+})
 export const duration = ref(0)
 export const volume = ref(0.8)
 export const isMuted = ref(false)
@@ -80,6 +88,63 @@ export const playModeLabel = computed(() => {
   const labels = { list: '列表播放', loop: '列表循环', single: '单曲循环', random: '随机播放' }
   return labels[playMode.value] || '列表播放'
 })
+
+/** 睡眠定时：到点停止播放（分钟） */
+export const sleepTimerMinutes = ref(0)
+export const sleepTimerEndsAt = ref(0)
+let sleepTimerId = null
+let sleepTickId = null
+export const sleepTimerLeftLabel = ref('')
+
+function refreshSleepLeftLabel() {
+  if (!sleepTimerEndsAt.value) {
+    sleepTimerLeftLabel.value = ''
+    return
+  }
+  const left = Math.max(0, sleepTimerEndsAt.value - Date.now())
+  if (left <= 0) {
+    sleepTimerLeftLabel.value = ''
+    return
+  }
+  const m = Math.floor(left / 60000)
+  const s = Math.floor((left % 60000) / 1000)
+  sleepTimerLeftLabel.value = `${m}:${String(s).padStart(2, '0')}`
+}
+
+export function clearSleepTimer({ silent = true } = {}) {
+  if (sleepTimerId) {
+    clearTimeout(sleepTimerId)
+    sleepTimerId = null
+  }
+  if (sleepTickId) {
+    clearInterval(sleepTickId)
+    sleepTickId = null
+  }
+  sleepTimerMinutes.value = 0
+  sleepTimerEndsAt.value = 0
+  sleepTimerLeftLabel.value = ''
+  if (!silent) showPlayerNotice('已取消睡眠定时', 3000)
+}
+
+/** @param {number} minutes 0 = 取消；15/30/45/60/90 */
+export function setSleepTimer(minutes) {
+  const mins = Math.max(0, Math.floor(Number(minutes) || 0))
+  clearSleepTimer({ silent: true })
+  if (!mins) {
+    showPlayerNotice('已取消睡眠定时', 3000)
+    return
+  }
+  sleepTimerMinutes.value = mins
+  sleepTimerEndsAt.value = Date.now() + mins * 60 * 1000
+  refreshSleepLeftLabel()
+  sleepTickId = setInterval(refreshSleepLeftLabel, 1000)
+  sleepTimerId = setTimeout(() => {
+    stopPlay()
+    clearSleepTimer({ silent: true })
+    showPlayerNotice('睡眠定时已到，已停止播放', 8000)
+  }, mins * 60 * 1000)
+  showPlayerNotice(`将在 ${mins} 分钟后停止播放`, 4000)
+}
 
 let audio = null
 let inited = false
@@ -382,13 +447,16 @@ function bindLyricsToTrack(trackKey, lyric) {
   activeLyricIdx.value = -1
 }
 
-function applyLyricStateFromTagMeta(data) {
+function applyLyricStateFromTagMeta(data, { announce = false } = {}) {
   if (!currentPlaying.value) return
   const key = getTrackKey(currentPlaying.value, currentPlaying.value.source)
   if (data.lyric !== undefined) {
     bindLyricsToTrack(key, data.lyric)
     if (audio && !audio.paused && lyricLines.value.some((line) => line.time > 0)) {
       updateActiveLyric(audio.currentTime)
+    }
+    if (announce && String(data.lyric || '').trim()) {
+      showPlayerNotice('歌词已同步到播放器', 2500)
     }
     return
   }
@@ -397,7 +465,7 @@ function applyLyricStateFromTagMeta(data) {
   }
 }
 
-function applyLocalMetaToPlaying(data, filePath) {
+function applyLocalMetaToPlaying(data, filePath, { announceLyric = false } = {}) {
   if (!data || !filePath) return
   const updates = buildPlayerUpdatesFromTagMeta(data, filePath)
   const queueChanged = patchQueueItemsByPath(filePath, updates)
@@ -411,7 +479,7 @@ function applyLocalMetaToPlaying(data, filePath) {
   if (updates.picUrl !== undefined || updates.img !== undefined) {
     setCoverUrl(updates.picUrl || updates.img || '')
   }
-  applyLyricStateFromTagMeta(data)
+  applyLyricStateFromTagMeta(data, { announce: announceLyric })
 
   if (Object.keys(updates).length) {
     currentPlaying.value = cleanTrackItem({ ...currentPlaying.value, ...updates })
@@ -424,7 +492,7 @@ export async function refreshPlayingLocalMeta(filePath, meta) {
   if (!filePath) return
   localMetaFetchToken++
   if (meta) {
-    applyLocalMetaToPlaying(meta, filePath)
+    applyLocalMetaToPlaying(meta, filePath, { announceLyric: true })
     return
   }
   const playingPath = getTrackFilePath(currentPlaying.value)
@@ -434,7 +502,7 @@ export async function refreshPlayingLocalMeta(filePath, meta) {
     const res = await api.tag.read(filePath)
     if (token !== localMetaFetchToken) return
     if (res?.error) return
-    applyLocalMetaToPlaying(res?.data || res, filePath)
+    applyLocalMetaToPlaying(res?.data || res, filePath, { announceLyric: true })
   } catch {}
 }
 
@@ -1071,6 +1139,191 @@ function applyDurationFallback(item) {
   if (fallback > 0) duration.value = fallback
 }
 
+let previewSwitchToken = 0
+let previewSwitchInFlight = false
+
+function waitForAudioDuration(timeoutMs = 5000) {
+  return new Promise((resolve) => {
+    if (!audio) {
+      resolve(0)
+      return
+    }
+    const ready = () => {
+      const d = Number(audio.duration)
+      return d > 0 && isFinite(d) ? d : 0
+    }
+    const now = ready()
+    if (now > 0) {
+      resolve(now)
+      return
+    }
+    let settled = false
+    const finish = () => {
+      if (settled) return
+      settled = true
+      cleanup()
+      resolve(ready())
+    }
+    const cleanup = () => {
+      clearTimeout(timer)
+      audio?.removeEventListener('loadedmetadata', finish)
+      audio?.removeEventListener('durationchange', finish)
+    }
+    const timer = setTimeout(finish, timeoutMs)
+    audio.addEventListener('loadedmetadata', finish)
+    audio.addEventListener('durationchange', finish)
+  })
+}
+
+function normalizeMatchText(s) {
+  return String(s || '')
+    .toLowerCase()
+    .replace(/[（(].*?[）)]/g, '')
+    .replace(/[\[【].*?[\]】]/g, '')
+    .replace(/\s+/g, '')
+    .trim()
+}
+
+function trackNameArtistScore(candidate, name, artist) {
+  const cn = normalizeMatchText(candidate?.name || candidate?.songname || '')
+  const ca = normalizeMatchText(candidate?.singer || candidate?.artist || '')
+  const n = normalizeMatchText(name)
+  const a = normalizeMatchText(artist)
+  if (!cn || !n) return 0
+  let score = 0
+  if (cn === n) score += 100
+  else if (cn.includes(n) || n.includes(cn)) score += 60
+  else return 0
+  if (a && ca) {
+    if (ca === a || ca.includes(a) || a.includes(ca)) score += 40
+    else score += 5
+  }
+  return score
+}
+
+async function findCrossPlatformMatch(item, platform) {
+  const name = String(item?.name || '').trim()
+  const artist = String(item?.singer || item?.artist || '').trim()
+  if (!name) return null
+  const keyword = [name, artist].filter(Boolean).join(' ')
+  try {
+    const res = await api.search.search(keyword, platform, 1, { timeout: 15000 })
+    const list = res?.data?.list || res?.list || []
+    if (!Array.isArray(list) || !list.length) return null
+    let best = null
+    let bestScore = 0
+    for (const row of list.slice(0, 12)) {
+      const score = trackNameArtistScore(row, name, artist)
+      if (score > bestScore) {
+        bestScore = score
+        best = row
+      }
+    }
+    if (!best || bestScore < 60) return null
+    return cleanTrackItem({ ...best, source: platform })
+  } catch {
+    return null
+  }
+}
+
+async function listPlayablePlatforms(exclude = '') {
+  try {
+    const res = await api.search.sources()
+    const map = res?.sources || res?.data || res || {}
+    const keys = Object.keys(map).filter((k) => PLATFORM_LABELS[k] || map[k])
+    return keys.filter((k) => k && k !== exclude && k !== 'local')
+  } catch {
+    return Object.keys(PLATFORM_LABELS).filter((k) => k !== exclude)
+  }
+}
+
+async function playUrlAndVerifyFull(item, source, { skipSourceIds = [], intent } = {}) {
+  clearCachedPlayUrl(item, source, DEFAULT_PLAY_QUALITY)
+  const url = await resolvePlayUrl(item, source, DEFAULT_PLAY_QUALITY, {
+    skipSourceIds,
+    intent,
+  })
+  if (!url) return { ok: false }
+  if (intent != null && intent !== playIntentToken) return { ok: false, aborted: true }
+  await startPlaybackFromUrl(url, { item, source, isLocal: false })
+  const actual = await waitForAudioDuration()
+  const expected = parseClipDuration(item.interval || item.duration)
+  const preview = detectPreviewClip(actual, expected)
+  const sourceId = currentPlaySourceApiId
+  const platform = item.source || source || ''
+  if (sourceId) {
+    api.source.reportHealth(sourceId, Boolean(preview), platform).catch(() => {})
+  }
+  if (preview) {
+    clearCachedPlayUrl(item, source, DEFAULT_PLAY_QUALITY)
+    return { ok: false, preview, sourceId, platform }
+  }
+  setCachedPlayUrl(item, source, DEFAULT_PLAY_QUALITY, url)
+  currentPlayPlatform.value = String(platform || source || '')
+  return { ok: true, platform, sourceId }
+}
+
+async function autoSwitchFromPreview(item, source, failedSourceId) {
+  const token = ++previewSwitchToken
+  const intent = playIntentToken
+  const skip = new Set([failedSourceId].filter(Boolean))
+  showPlayerNotice('检测到试听时长，正在自动切换音源/平台…', 10000)
+
+  // 1) 同平台换其它音源脚本
+  try {
+    const same = await playUrlAndVerifyFull(item, source, {
+      skipSourceIds: [...skip],
+      intent,
+    })
+    if (token !== previewSwitchToken || intent !== playIntentToken) return false
+    if (same.aborted) return false
+    if (same.ok) {
+      currentPlayPlatform.value = same.platform || source
+      showPlayerNotice(`已切换音源，完整播放（${platformLabel(same.platform || source)}）`, 5000)
+      previewWarnedTrackKey = getTrackKey(item, source)
+      return true
+    }
+    if (same.sourceId) skip.add(same.sourceId)
+  } catch {
+    // continue to cross-platform
+  }
+
+  // 2) 其它平台搜同名曲再试听
+  const platforms = await listPlayablePlatforms(source)
+  for (const plat of platforms) {
+    if (token !== previewSwitchToken || intent !== playIntentToken) return false
+    const match = await findCrossPlatformMatch(item, plat)
+    if (!match) continue
+    try {
+      const result = await playUrlAndVerifyFull(match, plat, { intent })
+      if (token !== previewSwitchToken || intent !== playIntentToken) return false
+      if (result.aborted) return false
+      if (!result.ok) continue
+
+      const cleaned = cleanTrackItem({ ...match, source: plat })
+      const key = getTrackKey(cleaned, plat)
+      const qi = currentQueueIndex.value
+      if (qi >= 0 && playQueue.value[qi]) {
+        playQueue.value[qi] = { key, item: cleaned, source: plat }
+      }
+      currentPlaying.value = cleaned
+      currentPlayPlatform.value = plat
+      previewWarnedTrackKey = key
+      showPlayerNotice(`已切换至 ${platformLabel(plat)}，完整播放`, 6000)
+      ensureLyricsForTrack(cleaned, plat, key)
+      saveQueueState()
+      return true
+    } catch {
+      // try next platform
+    }
+  }
+
+  if (token === previewSwitchToken) {
+    showPlayerNotice('各平台多为试听或无法完整播放，请更换/激活其它音源', 8000)
+  }
+  return false
+}
+
 function maybeWarnPreviewClip(item, source) {
   if (!item || isLocalTrack(item, source)) return
   const trackKey = getTrackKey(item, source)
@@ -1080,9 +1333,34 @@ function maybeWarnPreviewClip(item, source) {
   if (!(actual > 0 && isFinite(actual))) return
   const expected = parseClipDuration(item.interval || item.duration)
   const info = detectPreviewClip(actual, expected)
-  if (!info) return
+  const sourceId = currentPlaySourceApiId
+  const platform = item.source || source || ''
+  if (info) {
+    if (sourceId) api.source.reportHealth(sourceId, true, platform).catch(() => {})
+    if (previewSwitchInFlight) {
+      previewWarnedTrackKey = trackKey
+      showPlayerNotice(formatPreviewClipMessage(info))
+      return
+    }
+    previewSwitchInFlight = true
+    autoSwitchFromPreview(item, source, sourceId)
+      .then((switched) => {
+        if (!switched) {
+          previewWarnedTrackKey = trackKey
+          showPlayerNotice(formatPreviewClipMessage(info))
+        }
+      })
+      .catch(() => {
+        previewWarnedTrackKey = trackKey
+        showPlayerNotice(formatPreviewClipMessage(info))
+      })
+      .finally(() => {
+        previewSwitchInFlight = false
+      })
+    return
+  }
   previewWarnedTrackKey = trackKey
-  showPlayerNotice(formatPreviewClipMessage(info))
+  if (sourceId) api.source.reportHealth(sourceId, false, platform).catch(() => {})
 }
 
 function pickRandomIndex(exclude = -1) {
@@ -1182,16 +1460,29 @@ async function playNextAuto() {
     isPaused.value = true
     return
   }
-  const next = resolveNextIndex(true)
-  if (next < 0) {
-    isPaused.value = true
-    return
+  const maxSkip = Math.min(playQueue.value.length, 8)
+  const tried = new Set()
+  for (let i = 0; i < maxSkip; i++) {
+    const next = resolveNextIndex(true)
+    if (next < 0) {
+      isPaused.value = true
+      return
+    }
+    if (tried.has(next)) {
+      isPaused.value = true
+      return
+    }
+    tried.add(next)
+    try {
+      await playTrackAt(next)
+      return
+    } catch (e) {
+      if (e?.aborted) return
+      // 自动连播时跳过无法播放的曲目，继续下一首
+      if (i === 0) showPlayerNotice('当前曲目无法播放，已跳过', 4000)
+    }
   }
-  try {
-    await playTrackAt(next)
-  } catch {
-    isPaused.value = true
-  }
+  isPaused.value = true
 }
 
 export async function loadCoverStyle() {
@@ -1295,6 +1586,8 @@ export function isInQueue(item, source) {
 }
 
 let playUrlAbort = null
+/** 当前播放解析到的音源脚本 id（用于健康统计） */
+let currentPlaySourceApiId = ''
 
 function cancelPlayUrlFetch() {
   playUrlAbort?.abort()
@@ -1308,7 +1601,7 @@ async function resolvePlayUrl(item, source, quality = DEFAULT_PLAY_QUALITY, opti
   }
 
   const cached = getCachedPlayUrl(item, source, quality)
-  if (cached && !options.sourceApiId) return cached
+  if (cached && !options.sourceApiId && !(options.skipSourceIds?.length)) return cached
 
   const payload = buildPlayPayload(item, source, quality)
   if (options.sourceApiId) payload.sourceApiId = options.sourceApiId
@@ -1318,8 +1611,14 @@ async function resolvePlayUrl(item, source, quality = DEFAULT_PLAY_QUALITY, opti
     const res = await api.play.getUrl(payload, { signal: options.signal })
     if (options.intent != null && options.intent !== playIntentToken) return ''
     if (res.sourceInfo?.switched) notifySourceSwitch(res.sourceInfo)
+    if (res.sourceInfo?.id) currentPlaySourceApiId = res.sourceInfo.id
+    else if (options.sourceApiId) currentPlaySourceApiId = options.sourceApiId
     const url = res.url || ''
-    if (url) setCachedPlayUrl(item, source, quality, url)
+    // 试听切换过程中不要把可能仍是预览的链写进缓存
+    if (url && !(options.skipSourceIds?.length)) setCachedPlayUrl(item, source, quality, url)
+    if (url && !(options.skipSourceIds?.length)) {
+      currentPlayPlatform.value = String(source || item.source || '')
+    }
     return url
   } catch (e) {
     if (e.aborted) {
@@ -1531,7 +1830,11 @@ export async function playTrackAt(index, { fromHistory = false, resumeTime = 0 }
   playerError.value = ''
   clearPlayerNotice()
   previewWarnedTrackKey = ''
+  currentPlaySourceApiId = ''
+  previewSwitchToken++
+  previewSwitchInFlight = false
   const isLocal = isLocalTrack(item, source)
+  currentPlayPlatform.value = isLocal ? '' : String(source || item.source || '')
   const quality = DEFAULT_PLAY_QUALITY
   const maxAttempts = isLocal ? 2 : 1
 
@@ -1799,6 +2102,8 @@ export function stopPlay() {
   cancelPlaybackIntent()
   clearMediaAudioCache()
   stopPlaybackGraph()
+  previewSwitchToken++
+  previewSwitchInFlight = false
   if (audio) {
     audio.pause()
     audio.removeAttribute('src')
@@ -1810,6 +2115,7 @@ export function stopPlay() {
   isPaused.value = true
   currentTime.value = 0
   duration.value = 0
+  currentPlayPlatform.value = ''
   setCoverUrl('')
   resetLyricState()
   playerError.value = ''

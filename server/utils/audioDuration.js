@@ -1,6 +1,6 @@
 /**
  * 试听片段 / 不完整音轨检测
- * 试听源返回的音频「总时长」本身常为 10–30 秒，可据此在落盘前拦截。
+ * 试听源返回的音频「总时长」本身常为短片段，可据此在落盘前拦截。
  */
 import needle from 'needle'
 
@@ -29,7 +29,7 @@ export function parseDurationSeconds(value) {
 /**
  * @param {number} actualSec 音源/文件给出的总时长
  * @param {number} expectedSec 曲目录入的完整时长（搜索结果等）
- * @param {{ absoluteShort?: boolean }} [opts] absoluteShort：下载场景下，音源总时长本身很短也视为试听
+ * @param {{ absoluteShort?: boolean, forDownload?: boolean }} [opts]
  * @returns {{ isPreview: true, actualSec: number, expectedSec: number } | null}
  */
 export function detectPreviewClip(actualSec, expectedSec, opts = {}) {
@@ -37,20 +37,31 @@ export function detectPreviewClip(actualSec, expectedSec, opts = {}) {
   const expected = Number(expectedSec) || 0
   if (actual <= 0) return null
 
-  // 已知完整时长：实际明显偏短
-  if (expected >= 90) {
-    if (actual <= 60 && actual < expected * 0.45) {
-      return pack(actual, expected)
-    }
-  } else if (expected >= 60) {
-    if (actual <= 40 && actual < expected * 0.5) {
-      return pack(actual, expected)
+  const forDownload = Boolean(opts.forDownload || opts.absoluteShort)
+
+  // 有完整参考时长：实际明显偏短 → 试听 / 不完整
+  if (expected >= 45) {
+    const ratio = actual / expected
+    const shortfall = expected - actual
+
+    if (forDownload) {
+      // 下载从严：比完整短 ≥30 秒，且不足约 65% → 不落盘
+      if (shortfall >= 30 && ratio < 0.65) return pack(actual, expected)
+      // 常见 VIP 约 60～95 秒试听，完整曲 ≥2 分钟
+      if (expected >= 120 && actual <= 95 && ratio < 0.55) return pack(actual, expected)
+    } else {
+      // 播放提示：覆盖约 1 分钟试听 vs 完整曲
+      if (shortfall >= 25 && ratio < 0.55) return pack(actual, expected)
+      if (expected >= 90 && actual <= 70 && ratio < 0.5) return pack(actual, expected)
     }
   }
 
-  // 下载：音源给出的「总时长」本身就只有十多秒（常见 VIP 试听）
-  // 完整曲目搜索时长缺失或也被标成短时长时，仍拦截半分钟内的资源
-  if (opts.absoluteShort && actual > 0 && actual <= 35) {
+  // 无可靠完整时长时：下载仍拦截「本身就很短」的资源
+  if (forDownload && actual > 0 && actual <= 50) {
+    if (!expected || expected <= 55 || actual < expected * 0.55) {
+      return pack(actual, expected)
+    }
+  } else if (!forDownload && opts.absoluteShort !== false && actual > 0 && actual <= 35) {
     if (!expected || expected <= 45 || actual < expected * 0.5) {
       return pack(actual, expected)
     }
@@ -72,7 +83,7 @@ export function formatPreviewClipMessage(info, { forDownload = false } = {}) {
   const expected = info?.expectedSec || 0
   const expectedText = expected > 0 ? `（完整约 ${formatClock(expected)}）` : ''
   if (forDownload) {
-    return `当前音源仅提供约 ${formatClock(actual)} 试听片段${expectedText}，时长不完整，已取消下载。请更换音源后重试`
+    return `检测为试听时长约 ${formatClock(actual)}${expectedText}，与完整曲相差较多，已取消下载。请更换音源后重试`
   }
   return `当前音源仅支持试听约 ${formatClock(actual)}${expectedText}，完整播放请更换或激活其他音源`
 }
@@ -157,6 +168,7 @@ function guessMimeFromUrl(url, contentType) {
 export function assertNotPreviewClip(actualSec, expectedSec, { forDownload = false } = {}) {
   const preview = detectPreviewClip(actualSec, expectedSec, {
     absoluteShort: forDownload,
+    forDownload,
   })
   if (!preview) return null
   const err = new Error(formatPreviewClipMessage(preview, { forDownload }))

@@ -18,6 +18,13 @@ import {
   saveActiveSourceIds,
 } from '../utils/activeSources.js'
 import { getSourceFault, clearSourceFault, recordSourceFault } from '../sourceFault.js'
+import {
+  getAllSourceHealth,
+  dismissSourceHealth,
+  clearSourceHealth,
+  recordSourceHealthOutcome,
+  sourceHealthPublicView,
+} from '../utils/sourceHealth.js'
 import { parseScriptMeta, metaToDbFields } from '../utils/parseScriptMeta.js'
 import { requireAdmin } from '../middleware/auth.js'
 
@@ -47,11 +54,13 @@ async function fetchScriptFromUrl(url) {
 sourceRouter.get('/list', (req, res) => {
   refreshStoredSourceMeta()
   const activeIds = new Set(getStoredActiveSourceIds(req.user?.id))
+  const healthMap = getAllSourceHealth()
   const rows = getDB().prepare('SELECT id, name, description, author, version, homepage, sources FROM user_apis').all()
   res.json(rows.map(r => ({
     ...r,
     sources: JSON.parse(r.sources),
     active: activeIds.has(r.id),
+    health: sourceHealthPublicView(healthMap[r.id]),
   })))
 })
 
@@ -86,6 +95,7 @@ sourceRouter.delete('/:id', requireAdmin, (req, res) => {
   getDB().prepare('DELETE FROM user_apis WHERE id = ?').run(req.params.id)
   const fault = getSourceFault()
   if (fault?.id === req.params.id) clearSourceFault()
+  clearSourceHealth(req.params.id)
   res.json({ ok: true })
 })
 
@@ -96,6 +106,44 @@ sourceRouter.get('/fault', (_req, res) => {
 sourceRouter.post('/fault/dismiss', (_req, res) => {
   clearSourceFault()
   res.json({ ok: true })
+})
+
+/** 客户端上报试听片段检测结果（播放侧） */
+sourceRouter.post('/health/report', (req, res) => {
+  try {
+    const { sourceId, isPreview, platform, source } = req.body || {}
+    if (!sourceId) return res.status(400).json({ error: '缺少 sourceId' })
+    const entry = recordSourceHealthOutcome(
+      sourceId,
+      Boolean(isPreview),
+      platform || source || '',
+    )
+    res.json({ ok: true, health: sourceHealthPublicView(entry) })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+sourceRouter.post('/health/dismiss', (req, res) => {
+  try {
+    const { sourceId } = req.body || {}
+    if (!sourceId) return res.status(400).json({ error: '缺少 sourceId' })
+    const entry = dismissSourceHealth(sourceId)
+    res.json({ ok: true, health: sourceHealthPublicView(entry) })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+sourceRouter.post('/health/clear', requireAdmin, (req, res) => {
+  try {
+    const { sourceId } = req.body || {}
+    if (!sourceId) return res.status(400).json({ error: '缺少 sourceId' })
+    clearSourceHealth(sourceId)
+    res.json({ ok: true })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
 })
 
 sourceRouter.post('/fault/delete', requireAdmin, (_req, res) => {

@@ -34,7 +34,7 @@
           <div v-else class="cover-placeholder">无封面</div>
         </div>
         <input type="file" accept="image/*" @change="onCoverUpload" />
-        <input v-model="editForm.picUrl" placeholder="或输入封面 URL" @input="markModified" />
+        <input v-model="editForm.picUrl" placeholder="或输入封面 URL" @input="onPicUrlInput" />
       </label>
 
       <label class="field-block">歌词
@@ -171,6 +171,7 @@ const sourceOptions = [
 const loading = ref(true)
 const saving = ref(false)
 const modified = ref(false)
+const coverDirty = ref(false)
 const editForm = ref(null)
 const toast = ref(null)
 const playBusy = ref(false)
@@ -232,6 +233,11 @@ function markModified() {
   modified.value = true
 }
 
+function onPicUrlInput() {
+  coverDirty.value = true
+  markModified()
+}
+
 function showToast(text, type = 'info') {
   toast.value = { text, type }
   setTimeout(() => { toast.value = null }, 3000)
@@ -256,6 +262,7 @@ function createEmptyForm() {
 async function loadFile() {
   loading.value = true
   modified.value = false
+  coverDirty.value = false
   editForm.value = createEmptyForm()
   if (!props.filePath) {
     loading.value = false
@@ -297,8 +304,11 @@ function buildMetaPayload() {
     comment: form.comment,
     lyric: form.lyric,
   }
-  if (form.pictureBase64) meta.pic = form.pictureBase64
-  else if (form.picUrl) meta.picUrl = form.picUrl
+  if (coverDirty.value) {
+    if (form.pictureBase64) meta.pic = form.pictureBase64
+    else if (form.picUrl) meta.picUrl = form.picUrl
+    else meta.clearPicture = true
+  }
   return meta
 }
 
@@ -330,6 +340,7 @@ async function save() {
     const row = (res.data || [])[0]
     if (!row?.ok) throw new Error(row?.error || '保存失败')
     modified.value = false
+    coverDirty.value = false
     const saved = buildSavedFileRow()
     updateLibraryTracksFromFiles([saved])
     await refreshPlayingLocalMeta(props.filePath, saved)
@@ -457,6 +468,7 @@ function applyFetchedMetaToForm(meta) {
     if (meta.pic) editForm.value.pictureBase64 = meta.pic
     else if (meta.picUrl) editForm.value.picUrl = meta.picUrl
     else if (fetchPreview.value?.picUrl) editForm.value.picUrl = fetchPreview.value.picUrl
+    coverDirty.value = true
   } else if (fetchIntent.value === 'lyric' && meta.lyric) {
     editForm.value.lyric = meta.lyric
   }
@@ -481,6 +493,7 @@ function onCoverUpload(e) {
   const reader = new FileReader()
   reader.onload = () => {
     editForm.value.pictureBase64 = reader.result
+    coverDirty.value = true
     markModified()
   }
   reader.readAsDataURL(file)

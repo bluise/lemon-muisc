@@ -12,6 +12,7 @@ import { pathsRouter } from './paths.js'
 import { aboutRouter } from './about.js'
 import { healthRouter } from './health.js'
 import { libraryRouter } from './library.js'
+import { backupRouter } from './backup.js'
 import { requireAuth } from '../middleware/auth.js'
 
 export const apiRouter = Router()
@@ -32,3 +33,4 @@ apiRouter.use('/play', playRouter)
 apiRouter.use('/paths', pathsRouter)
 apiRouter.use('/about', aboutRouter)
 apiRouter.use('/library', libraryRouter)
+apiRouter.use('/backup', backupRouter)

@@ -11,6 +11,7 @@ import {
 } from './utils/ceruSourceRuntime.js'
 import { formatUserError } from './utils/userError.js'
 import { assertMusicUrl } from './utils/sourceResult.js'
+import { getSourceHealth } from './utils/sourceHealth.js'
 
 /** @type {Map<string, { id: string, handler: Function|null, sources: object, pendingRequests: Map }>} */
 const activeSources = new Map()
@@ -406,7 +407,30 @@ function resolveCandidates(source, action, allowedSourceIds = null) {
       .filter((s) => s?.handler && (!allow || allow.has(s.id)))
       .reverse()
   }
+  // 该平台历史上「完整」的音源优先，「多为试听」的靠后
   return candidates
+    .map((entry, idx) => ({
+      entry,
+      idx,
+      score: platformHealthScore(entry.id, source),
+    }))
+    .sort((a, b) => (b.score - a.score) || (a.idx - b.idx))
+    .map((x) => x.entry)
+}
+
+function platformHealthScore(sourceId, platform) {
+  try {
+    const h = getSourceHealth(sourceId)
+    if (!h) return 0
+    const p = (h.platforms || []).find((x) => String(x.id) === String(platform))
+    if (p?.level === 'ok') return 100
+    if (p?.level === 'preview') return -100
+    if (p?.level === 'watch') return -10
+    if (h.level === 'preview' && !(h.platforms || []).length) return -30
+    return 0
+  } catch {
+    return 0
+  }
 }
 
 function actionLabel(action) {

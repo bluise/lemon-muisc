@@ -38,6 +38,29 @@
           </section>
 
           <section class="account-section card-inner">
+            <div class="block-label">备份与迁移</div>
+            <p class="account-tip">导出当前账号的歌单、收藏、最近播放与个人界面设置；可在其他设备导入恢复。</p>
+            <div class="account-actions">
+              <button class="btn-primary btn-sm" type="button" :disabled="backupBusy" @click="exportBackup">
+                {{ backupBusy ? '处理中…' : '导出备份' }}
+              </button>
+              <button class="btn-ghost btn-sm" type="button" :disabled="backupBusy" @click="triggerImportBackup">导入备份</button>
+              <input ref="backupFileInput" type="file" accept="application/json,.json" style="display:none" @change="onImportBackupFile" />
+            </div>
+            <p class="account-tip">导入默认覆盖同账号对应数据；可改为合并歌单。</p>
+            <div class="setting-item account-backup-merge">
+              <div class="setting-item-info">
+                <div class="setting-item-label">合并导入歌单</div>
+                <div class="setting-item-desc">开启后按歌单 ID 合并，不整表覆盖</div>
+              </div>
+              <label class="toggle">
+                <input v-model="backupMerge" type="checkbox" />
+                <span class="slider"></span>
+              </label>
+            </div>
+          </section>
+
+          <section class="account-section card-inner">
             <div class="block-label">邮箱</div>
             <p class="account-tip">绑定邮箱后可接收验证邮件，并使用「忘记密码」找回账号。</p>
             <div v-if="currentAuthUser?.email" class="account-email-status">
@@ -395,8 +418,8 @@
 
       <!-- 音源管理 -->
       <div v-if="activeTab === 'source'" class="panel-body">
-        <p v-if="isAdminUser" class="source-tip">支持同时激活多个音源（落雪兼容 / 澜音原生 .js）。每个账号的激活状态相互独立；试听 / 下载时按平台匹配，同一平台有多个音源时优先使用最近激活的。</p>
-        <p v-else class="source-tip">音源脚本由管理员导入。你可以自行激活或停用音源，状态仅对自己生效，不影响其他用户。</p>
+        <p v-if="isAdminUser" class="source-tip">支持同时激活多个音源（落雪兼容 / 澜音原生 .js）。每个账号的激活状态相互独立；试听 / 下载时按平台匹配，同一平台有多个音源时优先使用最近激活的。系统会根据近期播放/下载是否为「试听片段」评估音源健康度；聚合音源若部分平台完整、部分多为试听，会单独标注。试听检测到短片段时会自动换音源/其它平台，并累计学习各平台是否可用。</p>
+        <p v-else class="source-tip">音源脚本由管理员导入。你可以自行激活或停用音源，状态仅对自己生效。列表旁的健康标注来自本机近期播放/下载是否多为试听片段（含「部分平台试听」）；试听遇短片段会自动尝试其它音源或平台。</p>
         <div v-if="isAdminUser" class="setting-item">
           <div class="setting-item-info">
             <div class="setting-item-label">音源切换方式</div>
@@ -412,12 +435,41 @@
           </div>
         </div>
         <div class="source-list" v-if="sourceList.length">
-          <div v-for="s in sourceList" :key="s.id" class="source-item" :class="{ active: isSourceActive(s.id) }">
+          <div
+            v-for="s in sourceList"
+            :key="s.id"
+            class="source-item"
+            :class="{
+              active: isSourceActive(s.id),
+              unhealthy: s.health?.unhealthy,
+              'health-mixed': s.health?.unhealthy && s.health?.level === 'mixed',
+              'health-preview': s.health?.unhealthy && s.health?.level === 'preview',
+            }"
+          >
             <div class="source-info">
-              <span class="source-name">{{ s.name }}</span>
+              <div class="source-name-row">
+                <span class="source-name">{{ s.name }}</span>
+                <span
+                  v-if="s.health?.unhealthy && s.health?.badge"
+                  class="source-health-badge"
+                  :class="s.health.level === 'mixed' ? 'mixed' : 'preview'"
+                  :title="s.health.tip"
+                >{{ s.health.badge }}</span>
+              </div>
               <span class="source-meta">{{ s.author || '未知作者' }} · v{{ s.version || '?' }}{{ isSourceActive(s.id) ? ' · 已激活' : '' }}</span>
+              <span v-if="s.health?.unhealthy && s.health?.tip" class="source-health-tip">{{ s.health.tip }}</span>
+              <div v-if="s.health?.unhealthy && healthPlatformChips(s).length" class="source-health-platforms">
+                <span
+                  v-for="p in healthPlatformChips(s)"
+                  :key="p.id"
+                  class="source-plat-chip"
+                  :class="p.level"
+                  :title="platformHealthTitle(p)"
+                >{{ p.label }}{{ platformHealthSuffix(p) }}</span>
+              </div>
             </div>
             <div class="source-actions">
+              <button v-if="s.health?.unhealthy" class="btn-sm btn-ghost" @click="dismissSourceHealth(s)">知道了</button>
               <button v-if="!isSourceActive(s.id)" class="btn-sm btn-primary" @click="activateSource(s.id)">激活</button>
               <button v-else class="btn-sm btn-ghost" @click="deactivateSource(s.id)">停用</button>
               <button v-if="isAdminUser" class="btn-sm btn-danger" @click="removeSource(s.id)">删除</button>
@@ -812,6 +864,24 @@
             {{ mailTesting ? '发送中…' : '发送测试邮件' }}
           </button>
         </div>
+
+        <p class="source-tip" style="margin-top: 1.5rem">日活统计</p>
+        <div class="setting-item">
+          <div class="setting-item-info">
+            <div class="setting-item-label">日活统计</div>
+            <div class="setting-item-desc">
+              向作者上报匿名安装 ID、版本与当日在线时长，用于了解日活；不含歌单、路径、账号与歌曲信息。默认开启，可随时关闭。
+            </div>
+          </div>
+          <label class="toggle">
+            <input
+              type="checkbox"
+              :checked="settings['telemetry.enabled'] !== 'false'"
+              @change="toggleTelemetryEnabled"
+            />
+            <span class="slider"></span>
+          </label>
+        </div>
       </div>
     </main>
 
@@ -931,6 +1001,9 @@ const resetPasswordSaving = ref(false)
 const deleteConfirmUser = ref(null)
 const deletingUser = ref(false)
 const accountSaving = ref(false)
+const backupBusy = ref(false)
+const backupMerge = ref(false)
+const backupFileInput = ref(null)
 const emailBinding = ref(false)
 const resendingVerify = ref(false)
 const passwordChanging = ref(false)
@@ -1301,6 +1374,54 @@ async function saveAccountProfile() {
     showToast(e.message || '保存失败', 'error')
   } finally {
     accountSaving.value = false
+  }
+}
+
+async function exportBackup() {
+  if (backupBusy.value) return
+  backupBusy.value = true
+  try {
+    const res = await api.backup.export()
+    const payload = res?.data || res
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    const stamp = new Date().toISOString().slice(0, 10)
+    a.href = url
+    a.download = `lemon-music-backup-${stamp}.json`
+    a.click()
+    URL.revokeObjectURL(url)
+    showToast('备份已导出', 'success')
+  } catch (e) {
+    showToast(e.message || '导出失败', 'error')
+  } finally {
+    backupBusy.value = false
+  }
+}
+
+function triggerImportBackup() {
+  backupFileInput.value?.click()
+}
+
+async function onImportBackupFile(ev) {
+  const file = ev.target?.files?.[0]
+  if (ev.target) ev.target.value = ''
+  if (!file || backupBusy.value) return
+  backupBusy.value = true
+  try {
+    const text = await file.text()
+    const parsed = JSON.parse(text)
+    const mode = backupMerge.value ? 'merge' : 'replace'
+    const res = await api.backup.import(parsed, mode)
+    const imported = res?.imported || {}
+    showToast(
+      `导入完成：歌单 ${imported.playlists || 0}、收藏 ${imported.favorites || 0}、设置 ${imported.settings || 0}`,
+      'success',
+    )
+  } catch (e) {
+    showToast(e.message || '导入失败', 'error')
+  } finally {
+    backupBusy.value = false
   }
 }
 
@@ -1938,6 +2059,12 @@ async function toggleMailEnabled(e) {
   await saveSetting('mail.enabled')
 }
 
+async function toggleTelemetryEnabled(e) {
+  settings['telemetry.enabled'] = e.target.checked ? 'true' : 'false'
+  await saveSetting('telemetry.enabled')
+  showToast(e.target.checked ? '已开启日活统计' : '已关闭日活统计', 'success')
+}
+
 async function saveMailPassword() {
   if (!mailPasswordInput.value) return
   try {
@@ -2107,6 +2234,36 @@ async function activateSource(id) {
   } catch (e) {
     showToast(e.message, 'error')
   }
+}
+
+async function dismissSourceHealth(s) {
+  try {
+    await api.source.dismissHealth(s.id)
+    sourceList.value = sourceList.value.map((row) => (
+      row.id === s.id
+        ? { ...row, health: row.health ? { ...row.health, unhealthy: false, tip: '', badge: '' } : null }
+        : row
+    ))
+    showToast('已关闭该音源健康提示', 'info')
+  } catch (e) {
+    showToast(e.message || '操作失败', 'error')
+  }
+}
+
+function healthPlatformChips(s) {
+  const list = Array.isArray(s?.health?.platforms) ? s.health.platforms : []
+  return list.filter((p) => p.level === 'preview' || p.level === 'ok' || p.level === 'watch')
+}
+
+function platformHealthSuffix(p) {
+  if (p.level === 'preview') return '·试听'
+  if (p.level === 'ok') return '·完整'
+  return '·观察'
+}
+
+function platformHealthTitle(p) {
+  const pct = Math.round((p.ratio || 0) * 100)
+  return `${p.label}：近 ${p.sampleCount} 次约 ${pct}% 为试听片段`
 }
 
 async function deactivateSource(id) {
@@ -2573,10 +2730,61 @@ function showToast(text, type = 'info') {
   border: 1px solid transparent;
 }
 .source-item.active { border-color: var(--accent); background: var(--accent-muted); }
+.source-item.unhealthy { border-color: var(--warning, #e6a23c); }
+.source-item.health-mixed { border-color: color-mix(in srgb, var(--accent) 45%, var(--warning, #e6a23c)); }
 .source-info { display: flex; flex-direction: column; gap: 2px; }
+.source-name-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .source-name { font-size: 14px; font-weight: 500; }
+.source-health-badge {
+  font-size: 11px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: rgba(230, 162, 60, 0.18);
+  color: var(--warning, #e6a23c);
+}
+.source-health-badge.mixed {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent);
+}
+.source-health-tip {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--warning, #e6a23c);
+  line-height: 1.45;
+  max-width: 52ch;
+}
+.source-item.health-mixed .source-health-tip { color: var(--text-secondary); }
+.source-health-platforms {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+.source-plat-chip {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  background: var(--bg-elevated, transparent);
+}
+.source-plat-chip.preview {
+  border-color: color-mix(in srgb, var(--warning, #e6a23c) 55%, var(--border));
+  color: var(--warning, #e6a23c);
+  background: rgba(230, 162, 60, 0.12);
+}
+.source-plat-chip.ok {
+  border-color: color-mix(in srgb, var(--success, #67c23a) 45%, var(--border));
+  color: var(--success, #67c23a);
+  background: color-mix(in srgb, var(--success, #67c23a) 12%, transparent);
+}
+.source-plat-chip.watch {
+  border-color: var(--border);
+  color: var(--text-secondary);
+}
 .source-meta { font-size: 12px; color: var(--text-muted); }
-.source-actions { display: flex; gap: 6px; }
+.source-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 
 .import-tabs { display: flex; gap: 6px; margin-bottom: 12px; }
 .pill-tab {

@@ -19,6 +19,7 @@ import {
 import { refreshStoredSourceMeta } from './routes/source.js'
 import { installSourceFaultHandlers, recordSourceFault, getSourceFault } from './sourceFault.js'
 import { startMemoryGuard } from './utils/memoryGuard.js'
+import { startTelemetry, stopTelemetry } from './utils/telemetry.js'
 
 installSourceFaultHandlers()
 
@@ -31,7 +32,7 @@ const app = express()
 const server = http.createServer(app)
 
 app.use(cors())
-app.use(express.json({ limit: '10mb' }))
+app.use(express.json({ limit: '25mb' }))
 
 app.locals.dataPath = DATA_PATH
 app.locals.configPath = CONFIG_PATH
@@ -92,6 +93,7 @@ startMemoryGuard()
 
 function shutdown(signal) {
   console.log(`收到 ${signal}，正在关闭服务...`)
+  stopTelemetry()
   wss.close(() => {
     server.close(() => process.exit(0))
   })
@@ -119,4 +121,5 @@ server.listen(PORT, '::', () => {
   console.log(`Lemon Music running at http://[::]:${PORT} (IPv4+IPv6)`)
   console.log(`Download path: ${DATA_PATH}`)
   console.log(`Config path: ${CONFIG_PATH}`)
+  startTelemetry()
 })

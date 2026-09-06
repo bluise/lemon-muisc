@@ -42,8 +42,16 @@
 
 ## 本机打包
 
+发布 Releases 前，先在本机配置日活上报（`server/telemetry.local.json` 或环境变量 `TELEMETRY_URL` / `TELEMETRY_SECRET`），**勿把真实地址提交进仓库**。打包脚本会把配置注入 FPK：
+
 ```powershell
 npm run fpk:build
 ```
 
-输出：`fpk/lemon-music-1.2.3-x86.fpk` 与 `fpk/lemon-music-1.2.3-arm.fpk`（不要提交到 git）。
+无上报的测试包：
+
+```powershell
+npm run fpk:build:no-telemetry
+```
+
+输出：`fpk/lemon-music-<version>-x86.fpk` 与 `…-arm.fpk`（不要提交到 git）。

@@ -125,7 +125,8 @@ playRouter.post('/url', async (req, res) => {
     const type = quality || req.body.quality || '128k'
     const musicInfo = buildMusicInfo({ ...req.body, source, quality: type })
     const cacheKey = buildPlayUrlCacheKey(source, musicInfo.songId, type)
-    const cached = getCachedPlayUrl(cacheKey)
+    const bypassCache = Boolean(sourceApiId) || (Array.isArray(skipSourceIds) && skipSourceIds.length > 0)
+    const cached = bypassCache ? null : getCachedPlayUrl(cacheKey)
     if (cached) {
       return res.json({ ok: true, url: signPlayStreamUrl(cached, req), cached: true })
     }

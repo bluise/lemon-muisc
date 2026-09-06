@@ -1,5 +1,6 @@
 import NodeID3 from 'node-id3'
 import fs from 'fs'
+import path from 'path'
 import { detectImageMime } from './utils/fetchPic.js'
 import { normalizeLyricText, pickBestLyricText } from './utils/lyric.js'
 
@@ -54,21 +55,60 @@ async function writeFlacMeta(filePath, meta) {
   const data = fs.readFileSync(filePath)
   if (data.slice(0, 4).toString() !== 'fLaC') throw new Error('不是有效的 FLAC 文件')
 
-  const comments = []
-  if (meta.title != null) comments.push(`TITLE=${meta.title}`)
-  if (meta.artist != null) comments.push(`ARTIST=${meta.artist}`)
-  if (meta.album != null) comments.push(`ALBUM=${meta.album}`)
-  if (meta.year != null) comments.push(`DATE=${meta.year}`)
-  if (meta.genre != null) comments.push(`GENRE=${meta.genre}`)
-  if (meta.comment != null) comments.push(`COMMENT=${meta.comment}`)
-  if (meta.lyric != null) comments.push(`LYRICS=${meta.lyric}`)
-
-  const picBuf = decodePicInput(meta.pic)
-  if (comments.length === 0 && !picBuf) return
-
   const parsed = parseFlacBlocks(data)
-  const newFile = rebuildFlacBlocks(parsed, comments, picBuf)
-  fs.writeFileSync(filePath, newFile)
+  if (!parsed.audioData?.length) {
+    throw new Error('FLAC 元数据解析失败（音频流为空），已取消写入以免损坏文件')
+  }
+
+  // 合并已有 Vorbis 注释：只更新本次提交的字段，避免丢掉曲目号等其它标签
+  const tags = {}
+  const oldComment = parsed.blocks.find((b) => b.type === 4)
+  if (oldComment) Object.assign(tags, parseVorbisCommentBlock(oldComment.data))
+
+  const applyField = (key, value) => {
+    if (value === undefined) return
+    const text = value == null ? '' : String(value)
+    if (!text) delete tags[key]
+    else tags[key] = text
+  }
+  applyField('TITLE', meta.title)
+  applyField('ARTIST', meta.artist)
+  applyField('ALBUM', meta.album)
+  applyField('DATE', meta.year)
+  applyField('GENRE', meta.genre)
+  applyField('COMMENT', meta.comment)
+  applyField('LYRICS', meta.lyric)
+
+  const comments = Object.entries(tags).map(([k, v]) => `${k}=${v}`)
+  const picBuf = decodePicInput(meta.pic)
+  const clearPic = meta.clearPicture === true || meta.pic === ''
+
+  if (comments.length === 0 && !picBuf && !clearPic && !oldComment) {
+    // 无任何变更
+    return
+  }
+
+  const newFile = rebuildFlacBlocks(parsed, comments, picBuf, { clearPic })
+  atomicReplaceFile(filePath, newFile)
+}
+
+/** 先写临时文件再替换，避免写入中断导致 FLAC 损坏；跨盘时回退为 copy */
+function atomicReplaceFile(filePath, buffer) {
+  const dir = path.dirname(filePath)
+  const base = path.basename(filePath)
+  const tmp = path.join(dir, `.${base}.lemon-tag-${process.pid}-${Date.now()}.tmp`)
+  try {
+    fs.writeFileSync(tmp, buffer)
+    try {
+      fs.renameSync(tmp, filePath)
+    } catch {
+      fs.copyFileSync(tmp, filePath)
+      try { fs.unlinkSync(tmp) } catch {}
+    }
+  } catch (e) {
+    try { fs.unlinkSync(tmp) } catch {}
+    throw e
+  }
 }
 
 function parseFlacBlocks(data) {
@@ -76,14 +116,27 @@ function parseFlacBlocks(data) {
   let offset = 4
   let isLast = false
 
-  while (!isLast && offset < data.length) {
+  while (!isLast && offset + 4 <= data.length) {
     const header = data[offset]
     isLast = (header & 0x80) !== 0
     const type = header & 0x7f
     const length = (data[offset + 1] << 16) | (data[offset + 2] << 8) | data[offset + 3]
     offset += 4
+    if (length < 0 || offset + length > data.length) {
+      throw new Error('FLAC 元数据块长度异常，已取消写入')
+    }
+    // 元数据块类型仅 0–6 为常用；异常类型且已越过合理头区域时停止，避免把音频当元数据
+    if (type > 126) {
+      throw new Error('FLAC 元数据损坏，已取消写入')
+    }
     blocks.push({ type, data: data.slice(offset, offset + length) })
     offset += length
+  }
+
+  if (!blocks.length) throw new Error('FLAC 缺少元数据块')
+  // STREAMINFO 必须存在
+  if (!blocks.some((b) => b.type === 0)) {
+    throw new Error('FLAC 缺少 STREAMINFO，已取消写入')
   }
 
   return { blocks, audioData: data.slice(offset) }
@@ -125,10 +178,14 @@ function buildPictureBlock(pic) {
   return { type: 6, data: Buffer.concat([header, picBuf]) }
 }
 
-function rebuildFlacBlocks(parsed, comments, pic) {
+function rebuildFlacBlocks(parsed, comments, pic, { clearPic = false } = {}) {
   let { blocks, audioData } = parsed
 
-  blocks = blocks.filter(b => b.type !== 4 && b.type !== 6)
+  // 始终替换 Vorbis Comment；封面仅在明确更换/清除时才动，避免「只改标题却删掉封面」
+  blocks = blocks.filter((b) => b.type !== 4)
+  if (clearPic || pic) {
+    blocks = blocks.filter((b) => b.type !== 6)
+  }
 
   if (comments.length > 0) {
     blocks.push(buildVorbisCommentBlock(comments))

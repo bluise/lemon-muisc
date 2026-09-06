@@ -11,6 +11,9 @@
             <span class="version-pill">v{{ info?.currentVersion || '—' }}</span>
           </div>
           <p class="about-desc">{{ APP_DESCRIPTION }}</p>
+          <p class="about-privacy-hint">
+            为改进产品，默认会上报日活与使用时长（匿名安装 ID，不含歌单、路径、账号与歌曲信息）。管理员可在「设置 → 邮件服务」底部的「日活统计」中关闭。
+          </p>
           <a :href="REPO_URL" target="_blank" rel="noopener" class="about-repo">{{ REPO_URL }}</a>
         </div>
       </div>
@@ -356,6 +359,13 @@ function formatDate(iso) {
   border-radius: var(--radius-pill);
 }
 
+.about-privacy-hint {
+  margin: 0.5rem 0 0;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: var(--text-muted, #888);
+  max-width: 36rem;
+}
 .about-desc {
   font-size: 13px;
   color: var(--text-secondary);
