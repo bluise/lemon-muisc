@@ -310,22 +310,23 @@ tagRouter.post('/match-batch', async (req, res) => {
   try {
     const { files, source = 'wy' } = req.body
     if (!Array.isArray(files)) return res.status(400).json({ error: '请提供文件列表' })
+    if (files.length > 50) return res.status(400).json({ error: '单次最多 50 个文件' })
 
     const sdkSource = normalizeTagSource(source)
-    const results = []
-    for (const file of files) {
+    // 有限并发：加速批量匹配，同时降低被音源限流的概率
+    const concurrency = Math.min(3, Math.max(1, files.length))
+    const results = await mapWithConcurrency(files, concurrency, async (file) => {
       try {
         const matches = await matchByFilename(file.fileName, sdkSource, 1)
         if (!matches.length) {
-          results.push({ filePath: file.filePath, ok: false, error: '未找到匹配' })
-          continue
+          return { filePath: file.filePath, ok: false, error: '未找到匹配' }
         }
         const meta = await fetchMatchMeta(matches[0], sdkSource)
-        results.push({ filePath: file.filePath, ok: true, meta, match: matches[0] })
+        return { filePath: file.filePath, ok: true, meta, match: matches[0] }
       } catch (e) {
-        results.push({ filePath: file.filePath, ok: false, error: e.message })
+        return { filePath: file.filePath, ok: false, error: e.message }
       }
-    }
+    })
     res.json({ ok: true, data: results })
   } catch (e) {
     res.status(500).json({ error: e.message })

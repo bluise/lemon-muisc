@@ -90,7 +90,7 @@
               匹配并保存 {{ matchProgress.done }}/{{ matchProgress.total }}<template v-if="matchProgress.current"> · {{ matchProgress.current }}</template>
             </span>
           </div>
-          <div class="file-toolbar-actions">
+          <div class="file-toolbar-meta">
             <span class="file-count">
               {{ displayedFiles.length }} / {{ files.length }}
               <template v-if="missingFilesCount"> · 缺失 {{ missingFilesCount }}</template>
@@ -104,6 +104,8 @@
             <label class="check-all">
               <input type="checkbox" v-model="selectAll" @change="toggleAll" /> 全选
             </label>
+          </div>
+          <div class="file-toolbar-actions">
             <button class="btn-ghost btn-sm" :disabled="!activeDir || scanning || loadingMeta" @click="scanSubdirsRecursive">
               含子目录扫描
             </button>
@@ -116,8 +118,24 @@
             <button class="btn-ghost btn-sm" :disabled="!missingFilesCount || matching" @click="autoMatchMissing">
               {{ matching ? '匹配中...' : `匹配缺失 (${missingMatchCount})` }}
             </button>
-            <button class="btn-ghost btn-sm" :disabled="!selectedFiles.length || matching" @click="autoMatchSelected">
+            <button class="btn-ghost btn-sm" :disabled="!selectedFiles.length || matching || tagChecking" @click="autoMatchSelected">
               {{ matching ? '匹配中...' : `匹配选中 (${selectedFiles.length})` }}
+            </button>
+            <button
+              class="btn-ghost btn-sm"
+              :disabled="!files.length || matching || tagChecking"
+              title="按文件名搜索并为当前文件夹全部文件重写标签/封面/歌词，直接保存到磁盘"
+              @click="autoRematchAllByFilename"
+            >
+              {{ matching ? '匹配中...' : `按文件名重设全部 (${files.length})` }}
+            </button>
+            <button
+              class="btn-ghost btn-sm"
+              :disabled="tagChecking || matching || (!selectedFiles.length && !editingFile)"
+              title="按文件名搜索，检测内嵌标签是否与网络结果一致"
+              @click="runManualTagCheckSelected"
+            >
+              {{ tagChecking ? '检测中...' : '手动检测' }}
             </button>
             <AppSelect
               v-model="fetchSource"
@@ -131,17 +149,18 @@
           <div class="match-progress-fill" :style="{ width: matchPercent + '%' }" />
         </div>
 
-        <div class="table-wrap" v-if="displayedFiles.length">
+        <template v-if="displayedFiles.length">
+        <div class="table-wrap desktop-file-table" v-if="!isCompactLayout">
           <table>
             <thead>
               <tr>
                 <th class="col-check"></th>
                 <th>文件名</th>
                 <th>标题</th>
-                <th>歌手</th>
-                <th>专辑</th>
-                <th>封面</th>
-                <th>歌词</th>
+                <th class="col-artist">歌手</th>
+                <th class="col-album">专辑</th>
+                <th class="col-flag">封面</th>
+                <th class="col-flag">歌词</th>
                 <th class="col-play"></th>
               </tr>
             </thead>
@@ -166,11 +185,11 @@
                     <span class="file-name-text">{{ f.fileName }}</span>
                   </span>
                 </td>
-                <td class="cell-text">{{ f.title || '-' }}</td>
-                <td class="cell-text">{{ f.artist || '-' }}</td>
-                <td class="cell-text" :class="{ 'cell-missing': isTagFieldMissing(f, 'album') }">{{ f.album || '-' }}</td>
-                <td :class="{ 'cell-missing': isTagFieldMissing(f, 'cover') }">{{ f.hasPicture ? '✓' : '-' }}</td>
-                <td :class="{ 'cell-missing': isTagFieldMissing(f, 'lyric') }">{{ f.hasLyrics ? '✓' : '-' }}</td>
+                <td class="cell-text" :class="{ 'cell-suspect': f._checkMismatch?.title }">{{ f.title || '-' }}</td>
+                <td class="cell-text col-artist" :class="{ 'cell-suspect': f._checkMismatch?.artist }">{{ f.artist || '-' }}</td>
+                <td class="cell-text col-album" :class="{ 'cell-missing': isTagFieldMissing(f, 'album'), 'cell-suspect': f._checkMismatch?.album }">{{ f.album || '-' }}</td>
+                <td class="col-flag" :class="{ 'cell-missing': isTagFieldMissing(f, 'cover') }">{{ f.hasPicture ? '✓' : '-' }}</td>
+                <td class="col-flag" :class="{ 'cell-missing': isTagFieldMissing(f, 'lyric') }">{{ f.hasLyrics ? '✓' : '-' }}</td>
                 <td class="col-play" @click.stop>
                   <button
                     class="play-btn"
@@ -195,23 +214,95 @@
             </tbody>
           </table>
         </div>
+
+        <div class="mobile-file-list" v-else>
+          <div
+            v-for="f in displayedFiles"
+            :key="'m-' + f.filePath"
+            class="mobile-file-row"
+            :class="{
+              modified: f._modified,
+              active: editingFile?.filePath === f.filePath,
+              selected: f._selected,
+              playing: isPlayingFile(f),
+              'row-missing': isFileMissing(f, 'any'),
+            }"
+            @click="openEdit(f)"
+          >
+            <label class="mobile-file-check" @click.stop>
+              <input type="checkbox" v-model="f._selected" />
+            </label>
+            <div class="mobile-file-cover" aria-hidden="true">
+              <CoverArt :src="listCoverSrc(f)" loading="lazy" />
+            </div>
+            <div class="mobile-file-meta">
+              <div class="mobile-file-name" :title="f.filePath">{{ f.fileName }}</div>
+              <div class="mobile-file-sub" :class="{ 'text-suspect': f._checkMismatch?.title || f._checkMismatch?.artist }">
+                {{ f.title || f.parsedTitle || '无标题' }}
+                <span>·</span>
+                {{ f.artist || f.parsedArtist || '未知歌手' }}
+              </div>
+              <div class="mobile-file-flags">
+                <span :class="{ miss: isTagFieldMissing(f, 'album') }">专辑{{ f.album ? '✓' : '—' }}</span>
+                <span :class="{ miss: isTagFieldMissing(f, 'cover') }">封面{{ f.hasPicture ? '✓' : '—' }}</span>
+                <span :class="{ miss: isTagFieldMissing(f, 'lyric') }">歌词{{ f.hasLyrics ? '✓' : '—' }}</span>
+              </div>
+            </div>
+            <div class="mobile-file-actions" @click.stop>
+              <button
+                class="play-btn"
+                :title="isPlayingFile(f) && !isPaused ? '暂停' : '试听'"
+                @click="togglePlayFile(f)"
+              >
+                <svg v-if="isPlayingFile(f) && !isPaused" viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+                <svg v-else-if="loadingPlay === fileTrackId(f)" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" class="spin"><circle cx="12" cy="12" r="10" stroke-dasharray="50" stroke-dashoffset="20"/></svg>
+                <svg v-else viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>
+              </button>
+              <button
+                class="queue-add-btn"
+                :class="{ added: isFileInQueue(f) }"
+                :title="isFileInQueue(f) ? '已在试听列表' : '加入试听列表'"
+                @click="addFileToQueue(f)"
+              >
+                <svg v-if="isFileInQueue(f)" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                <svg v-else viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              </button>
+            </div>
+          </div>
+        </div>
+        </template>
         <div v-else-if="scanning" class="empty">正在加载文件夹...</div>
         <div v-else-if="files.length && missingFilter !== 'all'" class="empty">当前筛选条件下没有缺失文件</div>
         <div v-else class="empty">在左侧展开并选择文件夹，加载该层音频文件</div>
       </section>
 
-      <!-- 右侧：编辑面板（常驻，未选中时仅显示标题与占位） -->
-      <aside class="edit-panel card">
+      <div
+        v-if="showMobileEditSheet"
+        class="edit-sheet-backdrop"
+        @click="closeMobileEdit"
+      />
+
+      <!-- 右侧：编辑面板（桌面常驻；窄屏/手机为底部抽屉） -->
+      <aside class="edit-panel card" :class="{ 'sheet-open': showMobileEditSheet }">
         <div class="panel-title">
           {{ editPanelTitle }}
-          <button
-            v-if="!isBatchMode && editingFile && (editForm || loadingDetail)"
-            class="btn-ghost btn-sm play-inline"
-            @click="togglePlayFile(editingFile)"
-            :title="isPlayingFile(editingFile) && !isPaused ? '暂停' : '试听当前文件'"
-          >
-            {{ isPlayingFile(editingFile) && !isPaused ? '暂停' : '试听' }}
-          </button>
+          <div class="panel-title-actions">
+            <button
+              v-if="!isBatchMode && editingFile && (editForm || loadingDetail)"
+              class="btn-ghost btn-sm play-inline"
+              @click="togglePlayFile(editingFile)"
+              :title="isPlayingFile(editingFile) && !isPaused ? '暂停' : '试听当前文件'"
+            >
+              {{ isPlayingFile(editingFile) && !isPaused ? '暂停' : '试听' }}
+            </button>
+            <button
+              v-if="showMobileEditSheet"
+              type="button"
+              class="btn-icon edit-sheet-close"
+              title="关闭"
+              @click="closeMobileEdit"
+            >×</button>
+          </div>
         </div>
 
         <div v-if="loadingDetail" class="detail-loading">正在读取文件内置信息...</div>
@@ -219,7 +310,7 @@
         <div v-else-if="editForm" class="edit-form">
           <div class="field-toolbar meta-fetch-toolbar">
             <div class="split-btn">
-              <button class="btn-primary btn-sm" @click="openFetchModal('meta')" :disabled="fetchLoading">
+              <button class="btn-primary btn-sm" @click="openFetchModal('meta')" :disabled="fetchLoading || tagChecking">
                 {{ fetchLoading ? '获取中...' : '网络获取信息' }}
               </button>
               <AppSelect
@@ -230,10 +321,88 @@
                 title="选择音源"
               />
             </div>
+            <button
+              class="btn-ghost btn-sm"
+              :disabled="!editingFile || tagChecking || fetchLoading"
+              title="按文件名（歌手-歌名 / 歌名-歌手）搜索，对比内嵌标签是否正确"
+              @click="runManualTagCheck"
+            >
+              {{ tagChecking ? '检测中...' : '手动检测' }}
+            </button>
           </div>
-          <label>标题<input v-model="editForm.title" @input="markModified" /></label>
-          <label>歌手<input v-model="editForm.artist" @input="markModified" /></label>
-          <label>专辑<input v-model="editForm.album" @input="markModified" /></label>
+
+          <div v-if="tagCheckResult" class="tag-check-banner" :class="tagCheckResult.ok ? 'is-ok' : 'is-bad'">
+            <template v-if="tagCheckResult.ok">
+              检测通过：内嵌信息与按文件名搜索到的结果一致
+            </template>
+            <template v-else-if="tagCheckResult.reason === 'parse'">
+              无法从文件名解析歌手/歌名，请手动核对
+            </template>
+            <template v-else-if="tagCheckResult.reason === 'no-match'">
+              按文件名未搜到可靠结果，请换音源或手动搜索
+            </template>
+            <template v-else>
+              <div class="tag-check-title">标签可能不正确（按文件名搜索对比）</div>
+              <div class="tag-check-suggest">
+                <span v-if="tagCheckResult.suggested?.title">歌名建议：{{ tagCheckResult.suggested.title }}</span>
+                <span v-if="tagCheckResult.suggested?.artist">歌手建议：{{ tagCheckResult.suggested.artist }}</span>
+                <span v-if="tagCheckResult.suggested?.album">专辑建议：{{ tagCheckResult.suggested.album }}</span>
+                <span>将同时更新封面与歌词</span>
+              </div>
+              <button
+                type="button"
+                class="btn-primary btn-sm"
+                :disabled="tagCheckApplying"
+                @click="applyAllCheckSuggestions"
+              >{{ tagCheckApplying ? '获取封面/歌词…' : '全部采用建议' }}</button>
+            </template>
+          </div>
+
+          <label :class="{ 'field-suspect': isFieldSuspect('title') }">
+            <span class="field-label-row">
+              标题
+              <button
+                v-if="isFieldSuspect('title') && tagCheckResult?.suggested?.title"
+                type="button"
+                class="btn-ghost btn-xs suspect-apply"
+                @click="applyCheckSuggestion('title')"
+              >采用建议</button>
+            </span>
+            <input v-model="editForm.title" @input="onSuspectFieldInput('title')" />
+            <span v-if="isFieldSuspect('title') && tagCheckResult?.suggested?.title" class="suspect-tip">
+              建议：{{ tagCheckResult.suggested.title }}
+            </span>
+          </label>
+          <label :class="{ 'field-suspect': isFieldSuspect('artist') }">
+            <span class="field-label-row">
+              歌手
+              <button
+                v-if="isFieldSuspect('artist') && tagCheckResult?.suggested?.artist"
+                type="button"
+                class="btn-ghost btn-xs suspect-apply"
+                @click="applyCheckSuggestion('artist')"
+              >采用建议</button>
+            </span>
+            <input v-model="editForm.artist" @input="onSuspectFieldInput('artist')" />
+            <span v-if="isFieldSuspect('artist') && tagCheckResult?.suggested?.artist" class="suspect-tip">
+              建议：{{ tagCheckResult.suggested.artist }}
+            </span>
+          </label>
+          <label :class="{ 'field-suspect': isFieldSuspect('album') }">
+            <span class="field-label-row">
+              专辑
+              <button
+                v-if="isFieldSuspect('album') && tagCheckResult?.suggested?.album"
+                type="button"
+                class="btn-ghost btn-xs suspect-apply"
+                @click="applyCheckSuggestion('album')"
+              >采用建议</button>
+            </span>
+            <input v-model="editForm.album" @input="onSuspectFieldInput('album')" />
+            <span v-if="isFieldSuspect('album') && tagCheckResult?.suggested?.album" class="suspect-tip">
+              建议：{{ tagCheckResult.suggested.album }}
+            </span>
+          </label>
           <label>年份<input v-model="editForm.year" @input="markModified" /></label>
           <label>风格<input v-model="editForm.genre" @input="markModified" /></label>
           <label>描述<input v-model="editForm.comment" @input="markModified" /></label>
@@ -286,11 +455,18 @@
         </div>
 
         <div v-if="editForm && !loadingDetail" class="edit-actions">
-          <button class="btn-primary" @click="saveCurrent" :disabled="saving">
-            {{ saving ? '保存中...' : '保存到文件' }}
+          <button class="btn-primary" @click="saveCurrent" :disabled="saving" title="只写入当前正在编辑的这一首">
+            {{ saving ? '保存中...' : '保存当前到文件' }}
           </button>
-          <button class="btn-ghost" @click="applyToFiles" :disabled="!editForm" title="仅更新列表显示，不会写入磁盘，需点「保存到文件」">
-            应用到{{ isBatchMode ? '选中' : '当前' }}
+          <button
+            class="btn-ghost"
+            @click="applyToFiles"
+            :disabled="!editForm"
+            :title="isBatchMode
+              ? `把当前表单复制到选中的 ${selectedFiles.length} 个文件（仅列表，需再点顶部「保存全部修改」写盘）`
+              : '仅更新列表显示，不会写入磁盘'"
+          >
+            应用到{{ isBatchMode ? `选中(${selectedFiles.length})` : '当前' }}
           </button>
         </div>
       </aside>
@@ -422,7 +598,7 @@ import AppSelect from '../components/AppSelect.vue'
 import ClearableInput from '../components/ClearableInput.vue'
 import CoverArt from '../components/CoverArt.vue'
 import { collectDefaultExpandedPaths } from '../utils/dirTreeExpand.js'
-import { resolveSearchArtistTitle } from '../utils/filenameParse.js'
+import { resolveSearchArtistTitle, parseFilename } from '../utils/filenameParse.js'
 import { withStreamAuth } from '../utils/streamAuth.js'
 
 const sourceOptions = [
@@ -463,6 +639,27 @@ const loadingMeta = ref(false)
 const loadingDetail = ref(false)
 const metaProgress = ref({ done: 0, total: 0 })
 const metaLoadToken = ref(0)
+const isCompactLayout = ref(false)
+const tagChecking = ref(false)
+const tagCheckApplying = ref(false)
+const tagCheckResult = ref(null)
+let compactMq = null
+
+function syncCompactLayout() {
+  isCompactLayout.value = Boolean(compactMq?.matches)
+}
+
+const showMobileEditSheet = computed(() => (
+  isCompactLayout.value
+  && Boolean(editingFile.value && (editForm.value || loadingDetail.value))
+))
+
+function closeMobileEdit() {
+  editingFile.value = null
+  editForm.value = null
+  loadingDetail.value = false
+  tagCheckResult.value = null
+}
 
 function folderDisplayName(dirPath, depth) {
   if (!dirPath) return ''
@@ -591,9 +788,11 @@ const canConfirmFetch = computed(() => {
 })
 const editPanelTitle = computed(() => {
   if (loadingDetail.value) return '读取文件信息'
-  if (editForm.value && isBatchMode.value) return `批量编辑 (${selectedFiles.value.length})`
-  if (editForm.value) return '单文件编辑'
-  return '标签编辑'
+  if (!editForm.value) return '标签编辑'
+  const name = editingFile.value?.fileName || '当前文件'
+  const n = selectedFiles.value.length
+  if (n > 1) return `编辑：${name}（已选 ${n} 首）`
+  return '单文件编辑'
 })
 
 function refreshEditFormFromFile() {
@@ -636,6 +835,11 @@ watch(missingFilter, () => {
 })
 
 onMounted(async () => {
+  compactMq = window.matchMedia('(max-width: 1100px)')
+  syncCompactLayout()
+  if (compactMq.addEventListener) compactMq.addEventListener('change', syncCompactLayout)
+  else compactMq.addListener?.(syncCompactLayout)
+
   await loadDirs()
   await initTreeExpansion()
   const session = tagEditorSession.value
@@ -647,6 +851,10 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  if (compactMq) {
+    if (compactMq.removeEventListener) compactMq.removeEventListener('change', syncCompactLayout)
+    else compactMq.removeListener?.(syncCompactLayout)
+  }
   if (files.value.length) {
     saveTagEditorSession(activeDir.value, files.value)
   }
@@ -720,6 +928,7 @@ async function selectFolder(dir) {
   files.value = []
   editingFile.value = null
   editForm.value = null
+  tagCheckResult.value = null
   selectAll.value = false
 
   try {
@@ -771,6 +980,7 @@ async function scanSubdirsRecursive() {
   files.value = []
   editingFile.value = null
   editForm.value = null
+  tagCheckResult.value = null
   selectAll.value = false
 
   try {
@@ -914,11 +1124,33 @@ function autoMatchMissing() {
   runTagMatch(targets)
 }
 
+/** 按文件名重新搜索，覆盖重写当前文件夹全部文件的标签/封面/歌词并落盘 */
+function autoRematchAllByFilename() {
+  const targets = files.value
+  if (!targets.length) {
+    showToast('当前没有可重设的文件', 'info')
+    return
+  }
+  if (matching.value) {
+    showToast('已有自动匹配任务进行中', 'info')
+    return
+  }
+  const srcLabel = sourceOptions.find(o => o.value === fetchSource.value)?.label || fetchSource.value
+  const ok = window.confirm(
+    `将按文件名重新搜索（音源：${srcLabel}），并为当前文件夹共 ${targets.length} 个文件重写：\n`
+    + `标题、歌手、专辑、封面、歌词等，并直接保存到磁盘。\n\n`
+    + `现有标签会被覆盖。确定继续？`,
+  )
+  if (!ok) return
+  runTagMatch(targets)
+}
+
 async function openEdit(f) {
   editingFile.value = f
   fetchResults.value = []
   fetchPreview.value = null
   fetchPreviewMeta.value = null
+  tagCheckResult.value = f._tagCheckResult || null
 
   // 自动匹配 / 手动改过但未保存：优先用内存中的结果，避免磁盘旧标签覆盖
   if (f._modified) {
@@ -991,6 +1223,259 @@ function markModified() {
   if (editingFile.value) editingFile.value._modified = true
 }
 
+function normCmpText(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[\s\-–—_～~·・.。,，、'"`‘’“”()（）[\]【】]/g, '')
+}
+
+function fieldLikelyMatch(embedded, expected) {
+  const a = normCmpText(embedded)
+  const b = normCmpText(expected)
+  if (!b) return true
+  if (!a) return false
+  if (a === b) return true
+  if (a.includes(b) || b.includes(a)) return true
+  return false
+}
+
+function isFieldSuspect(field) {
+  return Boolean(tagCheckResult.value && !tagCheckResult.value.ok && tagCheckResult.value.mismatches?.[field])
+}
+
+function onSuspectFieldInput(field) {
+  markModified()
+  if (!tagCheckResult.value?.mismatches?.[field]) return
+  const suggested = tagCheckResult.value.suggested?.[field]
+  if (suggested && fieldLikelyMatch(editForm.value?.[field], suggested)) {
+    tagCheckResult.value.mismatches[field] = false
+    const stillBad = Object.values(tagCheckResult.value.mismatches).some(Boolean)
+    if (!stillBad) {
+      tagCheckResult.value = { ...tagCheckResult.value, ok: true, reason: '' }
+    }
+  }
+}
+
+function applyCheckSuggestion(field) {
+  if (!editForm.value || !tagCheckResult.value?.suggested?.[field]) return
+  editForm.value[field] = tagCheckResult.value.suggested[field]
+  if (tagCheckResult.value.mismatches) tagCheckResult.value.mismatches[field] = false
+  markModified()
+  const stillBad = Object.values(tagCheckResult.value.mismatches || {}).some(Boolean)
+  if (!stillBad) {
+    tagCheckResult.value = { ...tagCheckResult.value, ok: true, reason: '' }
+  }
+  if (editingFile.value) {
+    editingFile.value[field] = tagCheckResult.value.suggested[field]
+    editingFile.value._checkMismatch = { ...(tagCheckResult.value.mismatches || {}) }
+    editingFile.value._tagCheckResult = tagCheckResult.value
+  }
+}
+
+async function applyAllCheckSuggestions() {
+  if (!editForm.value || !tagCheckResult.value?.suggested) return
+  const match = tagCheckResult.value.match
+  if (!match) {
+    showToast('缺少匹配结果，请重新检测', 'info')
+    return
+  }
+
+  tagCheckApplying.value = true
+  try {
+    const res = await api.tag.matchApply(match, fetchSource.value, [
+      'title', 'artist', 'album', 'year', 'genre', 'comment', 'cover', 'lyric',
+    ])
+    const meta = res.data || {}
+
+    if (meta.title) editForm.value.title = meta.title
+    else if (tagCheckResult.value.suggested.title) editForm.value.title = tagCheckResult.value.suggested.title
+    if (meta.artist) editForm.value.artist = meta.artist
+    else if (tagCheckResult.value.suggested.artist) editForm.value.artist = tagCheckResult.value.suggested.artist
+    if (meta.album) editForm.value.album = meta.album
+    else if (tagCheckResult.value.suggested.album) editForm.value.album = tagCheckResult.value.suggested.album
+    if (meta.year) editForm.value.year = String(meta.year)
+    if (meta.genre) editForm.value.genre = meta.genre
+    if (meta.comment) editForm.value.comment = meta.comment
+
+    if (meta.pic) {
+      editForm.value.pictureBase64 = meta.pic
+      editForm.value.picUrl = ''
+    } else if (meta.picUrl) {
+      editForm.value.picUrl = meta.picUrl
+    } else if (match.picUrl) {
+      editForm.value.picUrl = match.picUrl
+    }
+
+    if (typeof meta.lyric === 'string') {
+      editForm.value.lyric = meta.lyric
+    }
+
+    if (tagCheckResult.value.mismatches) {
+      tagCheckResult.value.mismatches.title = false
+      tagCheckResult.value.mismatches.artist = false
+      tagCheckResult.value.mismatches.album = false
+    }
+    markModified()
+    tagCheckResult.value = { ...tagCheckResult.value, ok: true, reason: '' }
+
+    if (editingFile.value) {
+      const f = editingFile.value
+      f._checkMismatch = { title: false, artist: false, album: false }
+      f._tagCheckResult = tagCheckResult.value
+      f.title = editForm.value.title
+      f.artist = editForm.value.artist
+      f.album = editForm.value.album
+      if (editForm.value.pictureBase64 || editForm.value.picUrl) {
+        f.hasPicture = true
+        f._coverDirty = true
+        if (editForm.value.pictureBase64) f.pictureBase64 = editForm.value.pictureBase64
+        if (editForm.value.picUrl) f.picUrl = editForm.value.picUrl
+      }
+      if (editForm.value.lyric) {
+        f.hasLyrics = true
+        f.lyric = editForm.value.lyric
+      }
+    }
+
+    const parts = ['标签']
+    if (editForm.value.pictureBase64 || editForm.value.picUrl) parts.push('封面')
+    if (editForm.value.lyric) parts.push('歌词')
+    showToast(`已采用${parts.join('、')}，记得保存到文件`, 'success')
+  } catch (e) {
+    showToast(e.message || '获取封面/歌词失败', 'error')
+  } finally {
+    tagCheckApplying.value = false
+  }
+}
+
+/**
+ * 按文件名搜索（含歌手-歌名 / 歌名-歌手），与内嵌标签对比。
+ */
+async function inspectFileTagAccuracy(file, formSnapshot = null) {
+  const parsed = parseFilename(file.fileName || '')
+  if (!parsed.title && !parsed.artist) {
+    return { ok: false, reason: 'parse', mismatches: {}, suggested: {}, parsed }
+  }
+
+  const res = await api.tag.match(file.fileName, fetchSource.value)
+  const matches = res.data || []
+  if (!matches.length) {
+    return { ok: false, reason: 'no-match', mismatches: {}, suggested: {}, parsed }
+  }
+
+  const best = matches[0]
+  const suggested = {
+    title: String(best.name || '').trim(),
+    artist: String(best.singer || '').trim(),
+    album: String(best.album || best.albumName || '').trim(),
+  }
+
+  const current = formSnapshot || {
+    title: file.title || '',
+    artist: file.artist || '',
+    album: file.album || '',
+  }
+
+  const mismatches = {
+    title: !fieldLikelyMatch(current.title, suggested.title),
+    artist: !fieldLikelyMatch(current.artist, suggested.artist),
+    album: suggested.album ? !fieldLikelyMatch(current.album, suggested.album) : false,
+  }
+
+  // 内嵌标题与文件名两侧都不像，且搜索结果贴近文件名 → 强化标题错误
+  const titleFitsFilename = fieldLikelyMatch(current.title, parsed.title)
+    || (parsed.swapped && fieldLikelyMatch(current.title, parsed.swapped.title))
+  const suggestFitsFilename = fieldLikelyMatch(suggested.title, parsed.title)
+    || (parsed.swapped && fieldLikelyMatch(suggested.title, parsed.swapped.title))
+  if (!titleFitsFilename && suggestFitsFilename && suggested.title) {
+    mismatches.title = true
+  }
+
+  const hasMismatch = mismatches.title || mismatches.artist || mismatches.album
+  return {
+    ok: !hasMismatch,
+    reason: hasMismatch ? 'mismatch' : '',
+    mismatches,
+    suggested,
+    match: best,
+    parsed,
+  }
+}
+
+function applyInspectResultToFile(file, result) {
+  file._checkMismatch = { ...(result.mismatches || {}) }
+  file._checkSuggested = { ...(result.suggested || {}) }
+  file._tagCheckResult = result
+}
+
+async function runManualTagCheck() {
+  const f = editingFile.value
+  if (!f || !editForm.value) {
+    showToast('请先选择要检测的文件', 'info')
+    return
+  }
+  tagChecking.value = true
+  try {
+    const result = await inspectFileTagAccuracy(f, {
+      title: editForm.value.title,
+      artist: editForm.value.artist,
+      album: editForm.value.album,
+    })
+    tagCheckResult.value = result
+    applyInspectResultToFile(f, result)
+    if (result.reason === 'parse') showToast('无法从文件名解析歌手/歌名', 'info')
+    else if (result.reason === 'no-match') showToast('按文件名未搜到结果，可换音源重试', 'info')
+    else if (result.ok) showToast('检测通过：标签与搜索结果一致', 'success')
+    else showToast('发现不正确标签，已标黄，可按建议修改', 'info')
+  } catch (e) {
+    showToast(e.message || '检测失败', 'error')
+  } finally {
+    tagChecking.value = false
+  }
+}
+
+async function runManualTagCheckSelected() {
+  if (editingFile.value && editForm.value && !selectedFiles.value.length) {
+    await runManualTagCheck()
+    return
+  }
+  const targets = selectedFiles.value.length
+    ? selectedFiles.value
+    : (editingFile.value ? [editingFile.value] : [])
+  if (!targets.length) {
+    showToast('请先选择要检测的文件', 'info')
+    return
+  }
+  tagChecking.value = true
+  let bad = 0
+  let good = 0
+  let skip = 0
+  try {
+    for (const f of targets) {
+      const snapshot = (editingFile.value?.filePath === f.filePath && editForm.value)
+        ? {
+            title: editForm.value.title,
+            artist: editForm.value.artist,
+            album: editForm.value.album,
+          }
+        : null
+      const result = await inspectFileTagAccuracy(f, snapshot)
+      applyInspectResultToFile(f, result)
+      if (editingFile.value?.filePath === f.filePath) tagCheckResult.value = result
+      if (result.reason === 'parse' || result.reason === 'no-match') skip += 1
+      else if (result.ok) good += 1
+      else bad += 1
+    }
+    if (bad) showToast(`检测完成：${bad} 首标签可能不正确，${good} 首通过`, 'info')
+    else if (good) showToast(`检测完成：${good} 首通过` + (skip ? `，${skip} 首无法判定` : ''), 'success')
+    else showToast(`检测完成：${skip} 首无法判定（文件名或搜索）`, 'info')
+  } catch (e) {
+    showToast(e.message || '检测失败', 'error')
+  } finally {
+    tagChecking.value = false
+  }
+}
+
 function buildMetaFromForm() {
   const m = {
     title: editForm.value.title,
@@ -1025,72 +1510,89 @@ function applyMetaToFile(f, meta) {
   f._modified = true
 }
 
-function applyToFiles({ silent = false } = {}) {
-  if (!editForm.value) return
+/** 仅把表单同步到当前正在编辑的那一首，绝不波及其他选中项 */
+function syncFormToEditingFile() {
+  if (!editForm.value || !editingFile.value) return
   const meta = buildMetaFromForm()
-  const targets = isBatchMode.value ? selectedFiles.value : (editingFile.value ? [editingFile.value] : [])
-  if (!targets.length) return
-  const coverDirty = Boolean(editingFile.value?._coverDirty)
-  targets.forEach((f) => {
-    applyMetaToFile(f, meta)
-    if (coverDirty) f._coverDirty = true
-  })
-  if (!silent) {
-    showToast(`已更新 ${targets.length} 个文件的列表显示，尚未写入磁盘。请点击「保存到文件」按钮写入磁盘`, 'info')
+  applyMetaToFile(editingFile.value, meta)
+  if (editingFile.value._coverDirty || meta.pic || meta.picUrl) {
+    editingFile.value._coverDirty = true
   }
 }
 
-async function saveCurrent() {
-  // 表单才是最新内容：必须先同步到文件行再落盘。
-  // 否则第一次保存时 _modified=true 会跳过同步，把列表里的旧标签写回磁盘。
-  if (editForm.value) applyToFiles({ silent: true })
+function applyToFiles({ silent = false } = {}) {
+  if (!editForm.value) return
 
-  const targets = isBatchMode.value
-    ? selectedFiles.value.filter(f => f._modified)
-    : (editingFile.value?._modified ? [editingFile.value] : [])
+  // 多选时：必须明确「应用到选中」，并二次确认，防止误把同一首歌信息刷到全部文件
+  if (isBatchMode.value) {
+    const n = selectedFiles.value.length
+    const title = String(editForm.value.title || '').trim() || '(空标题)'
+    const ok = window.confirm(
+      `确定把当前编辑内容应用到选中的 ${n} 个文件？\n\n`
+      + `将统一写入标题「${title}」等字段。\n`
+      + `若这些文件不是同一首歌，请点「取消」。\n\n`
+      + `此步只更新列表，还需再点顶部「保存全部修改」才会写进磁盘。`,
+    )
+    if (!ok) return
 
-  if (!targets.length) {
-    showToast('没有需要保存的文件', 'info')
+    const meta = buildMetaFromForm()
+    const coverDirty = Boolean(editingFile.value?._coverDirty || meta.pic || meta.picUrl)
+    selectedFiles.value.forEach((f) => {
+      applyMetaToFile(f, meta)
+      if (coverDirty) f._coverDirty = true
+    })
+    if (!silent) {
+      showToast(`已应用到 ${n} 个文件的列表显示。请确认无误后再点「保存全部修改」写入磁盘`, 'info')
+    }
     return
+  }
+
+  syncFormToEditingFile()
+  if (!silent) showToast('已更新当前文件的列表显示，尚未写入磁盘', 'info')
+}
+
+async function saveCurrent() {
+  // 右侧主按钮：永远只保存「当前编辑」这一首，避免全选时误伤
+  if (editForm.value) syncFormToEditingFile()
+
+  const target = editingFile.value
+  if (!target?._modified) {
+    showToast('当前文件没有需要保存的修改', 'info')
+    return
+  }
+
+  const othersSelected = selectedFiles.value.length > 1
+  if (othersSelected) {
+    showToast(`仅保存当前这一首。若要统一改选中的 ${selectedFiles.value.length} 首，请先点「应用到选中」再点顶部「保存全部修改」`, 'info')
   }
 
   saving.value = true
   try {
-    const payload = targets.map(f => {
-      const meta = {
-        title: f.title,
-        artist: f.artist,
-        album: f.album,
-        year: f.year,
-        genre: f.genre,
-        comment: f.comment,
-        lyric: f.lyric,
-      }
-      // 仅封面有改动时才上传，避免每次带上大图导致请求失败，也避免误清封面
-      if (f._coverDirty) {
-        if (f.pictureBase64) meta.pic = f.pictureBase64
-        else if (f.picUrl) meta.picUrl = f.picUrl
-        else meta.clearPicture = true
-      }
-      return { filePath: f.filePath, meta }
-    })
-    const res = await api.tag.writeBatch(payload)
+    const meta = {
+      title: target.title,
+      artist: target.artist,
+      album: target.album,
+      year: target.year,
+      genre: target.genre,
+      comment: target.comment,
+      lyric: target.lyric,
+    }
+    if (target._coverDirty) {
+      if (target.pictureBase64) meta.pic = target.pictureBase64
+      else if (target.picUrl) meta.picUrl = target.picUrl
+      else meta.clearPicture = true
+    }
+    const res = await api.tag.writeBatch([{ filePath: target.filePath, meta }])
     const rows = res.data || []
-    const ok = rows.filter(r => r.ok).length
-    const fail = rows.filter(r => !r.ok)
-    targets.forEach(f => {
-      if (rows.some(r => r.filePath === f.filePath && r.ok)) {
-        f._modified = false
-        f._coverDirty = false
-        f._coverRev = Date.now()
-      }
-    })
-    await refreshPlayerAfterSave(targets.filter(f => !f._modified))
-    if (fail.length) {
-      const tip = fail[0]?.error || '写入失败'
-      showToast(`已保存 ${ok}/${targets.length}，失败 ${fail.length}：${tip}`, ok ? 'info' : 'error')
+    const row = rows[0]
+    if (row?.ok) {
+      target._modified = false
+      target._coverDirty = false
+      target._coverRev = Date.now()
+      await refreshPlayerAfterSave([target])
+      showToast('已保存当前文件', 'success')
     } else {
-      showToast(`已保存 ${ok}/${targets.length} 个文件`, 'success')
+      showToast(row?.error || '保存失败', 'error')
     }
   } catch (e) {
     showToast(e.message, 'error')
@@ -1100,12 +1602,25 @@ async function saveCurrent() {
 }
 
 async function saveAll() {
-  if (editForm.value) applyToFiles({ silent: true })
+  // 顶部「保存全部」：只落盘各自已标记修改的文件，不会用当前表单覆盖其它文件
+  if (editForm.value) syncFormToEditingFile()
   const modified = files.value.filter(f => f._modified)
   if (!modified.length) {
     showToast('没有需要保存的文件', 'info')
     return
   }
+
+  if (modified.length > 1) {
+    const sameTitle = modified.every(f => f.title === modified[0].title && f.artist === modified[0].artist)
+    if (sameTitle) {
+      const ok = window.confirm(
+        `即将把 ${modified.length} 个文件写入磁盘，且它们的标题/歌手相同（「${modified[0].title || ''}」/「${modified[0].artist || ''}」）。\n\n`
+        + `若这是误操作（例如全选后误点应用），请取消并逐个恢复。\n\n确定保存？`,
+      )
+      if (!ok) return
+    }
+  }
+
   saving.value = true
   try {
     const payload = modified.map(f => {
@@ -1491,7 +2006,23 @@ function showToast(text, type = 'info') {
   justify-content: space-between;
   gap: 8px;
 }
+.panel-title-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
 .play-inline { flex-shrink: 0; }
+.edit-sheet-close {
+  font-size: 22px;
+  line-height: 1;
+  padding: 2px 6px;
+  cursor: pointer;
+}
+.edit-sheet-close:hover { color: var(--text); }
+.edit-sheet-backdrop {
+  display: none;
+}
 .dir-hint { font-size: 11px; color: var(--text-muted); margin-bottom: 8px; line-height: 1.4; flex-shrink: 0; }
 
 .dir-add { display: flex; gap: 6px; }
@@ -1619,31 +2150,39 @@ function showToast(text, type = 'info') {
   align-items: center;
   gap: 8px;
   margin-bottom: 10px;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   flex-shrink: 0;
   min-width: 0;
 }
 .filter-input-wrap {
-  flex: 0 0 auto;
+  flex: 0 1 160px;
   width: auto;
+  min-width: 120px;
   overflow: visible;
 }
 .filter-input {
-  width: 148px;
-  min-width: 148px;
+  width: 100%;
+  min-width: 0;
   font-size: 13px;
   border-radius: var(--radius-pill);
   padding: 6px 14px;
   text-overflow: clip;
 }
-.file-toolbar-actions .file-count {
+.file-toolbar-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+.file-toolbar-meta .file-count {
   font-size: 12px;
   color: var(--text-muted);
   flex-shrink: 0;
   white-space: nowrap;
 }
 .file-toolbar-info {
-  flex: 1 1 0;
+  flex: 1 1 80px;
   min-width: 0;
   display: flex;
   align-items: center;
@@ -1661,11 +2200,15 @@ function showToast(text, type = 'info') {
 .file-toolbar-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
+  gap: 6px;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  min-width: 0;
+  justify-content: flex-end;
 }
 .file-toolbar-actions .btn-ghost,
-.file-toolbar-actions .check-all,
+.file-toolbar-meta .check-all,
+.file-toolbar-meta :deep(.app-select),
 .file-toolbar-actions :deep(.app-select) {
   flex-shrink: 0;
   white-space: nowrap;
@@ -1733,9 +2276,28 @@ tbody tr td.cell-missing {
   width: 72px;
   white-space: nowrap;
   text-align: right;
+  position: sticky;
+  right: 0;
+  background: var(--bg-elevated);
+  z-index: 1;
+  box-shadow: -6px 0 8px -6px rgba(0, 0, 0, 0.25);
 }
-.col-play .play-btn,
-.col-play .queue-add-btn {
+tbody tr .col-play {
+  background: var(--bg-card, var(--bg-elevated));
+}
+tbody tr:hover .col-play,
+tbody tr.active .col-play,
+tbody tr.modified .col-play,
+tbody tr.playing .col-play {
+  background: var(--bg-hover);
+}
+tbody tr.active .col-play,
+tbody tr.modified .col-play,
+tbody tr.playing .col-play {
+  background: var(--accent-muted);
+}
+.play-btn,
+.queue-add-btn {
   width: 28px;
   height: 28px;
   padding: 0;
@@ -1749,21 +2311,107 @@ tbody tr td.cell-missing {
   vertical-align: middle;
   margin-right: 4px;
 }
-.col-play .play-btn:hover,
-.col-play .queue-add-btn:hover {
+.play-btn:hover,
+.queue-add-btn:hover {
   color: var(--accent);
   border-color: var(--accent);
   background: var(--accent-muted);
 }
-.col-play .queue-add-btn.added {
+.queue-add-btn.added {
   color: var(--success);
   border-color: var(--success);
   background: rgba(52, 199, 89, 0.1);
 }
-tr.playing .play-btn {
+tr.playing .play-btn,
+.mobile-file-row.playing .play-btn {
   color: var(--accent);
   border-color: var(--accent);
   background: var(--accent-muted);
+}
+
+.mobile-file-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--bg-card, var(--bg-elevated));
+}
+.mobile-file-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border-light);
+  cursor: pointer;
+  min-width: 0;
+}
+.mobile-file-row:last-child { border-bottom: none; }
+.mobile-file-row:hover,
+.mobile-file-row.active,
+.mobile-file-row.modified,
+.mobile-file-row.playing {
+  background: var(--bg-hover);
+}
+.mobile-file-row.active,
+.mobile-file-row.modified,
+.mobile-file-row.playing {
+  background: var(--accent-muted);
+}
+.mobile-file-check {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+}
+.mobile-file-cover {
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--bg-elevated, rgba(255, 255, 255, 0.06));
+  border: 1px solid var(--border-light, rgba(255, 255, 255, 0.08));
+}
+.mobile-file-meta {
+  flex: 1;
+  min-width: 0;
+}
+.mobile-file-name {
+  font-size: 13px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mobile-file-sub {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mobile-file-sub span { margin: 0 4px; opacity: 0.6; }
+.mobile-file-flags {
+  margin-top: 4px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.mobile-file-flags .miss { color: #f59e0b; }
+.mobile-file-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.mobile-file-actions .play-btn,
+.mobile-file-actions .queue-add-btn {
+  width: 34px;
+  height: 34px;
+  margin-right: 0;
 }
 .spin { animation: tag-spin 0.8s linear infinite; }
 @keyframes tag-spin { to { transform: rotate(360deg); } }
@@ -1832,10 +2480,74 @@ tr.playing .play-btn {
 
 .field-block { gap: 6px !important; }
 .field-toolbar { display: flex; align-items: center; margin-bottom: 4px; }
-.meta-fetch-toolbar { margin-bottom: 8px; }
+.meta-fetch-toolbar {
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
 .split-btn { display: flex; align-items: stretch; gap: 0; }
 .split-btn .btn-primary { border-radius: var(--radius) 0 0 var(--radius); }
 .split-btn .app-select { flex-shrink: 0; }
+
+.tag-check-banner {
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  font-size: 12px;
+  line-height: 1.5;
+  margin-bottom: 4px;
+}
+.tag-check-banner.is-ok {
+  background: rgba(52, 199, 89, 0.12);
+  border: 1px solid rgba(52, 199, 89, 0.35);
+  color: var(--success, #34c759);
+}
+.tag-check-banner.is-bad {
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.45);
+  color: #f59e0b;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+}
+.tag-check-title { font-weight: 600; }
+.tag-check-suggest {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  opacity: 0.95;
+}
+.field-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.btn-xs {
+  padding: 2px 8px;
+  font-size: 11px;
+  line-height: 1.4;
+}
+.field-suspect input,
+.field-suspect textarea {
+  border-color: #f59e0b !important;
+  background: rgba(245, 158, 11, 0.08);
+  box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.2);
+}
+.field-suspect .suspect-tip {
+  font-size: 11px;
+  color: #f59e0b;
+  margin-top: 2px;
+}
+.cell-suspect {
+  color: #f59e0b !important;
+  font-weight: 600;
+}
+.text-suspect {
+  color: #f59e0b !important;
+}
 
 .modal-overlay {
   position: fixed;
@@ -2035,6 +2747,20 @@ tr.playing .play-btn {
 .toast.error { background: var(--error); color: #fff; }
 .toast.info { background: var(--bg-card); border: 1px solid var(--border); }
 
+/* 中等宽度：收窄三栏，工具栏可换行，操作列粘滞可见 */
+@media (max-width: 1360px) {
+  .tag-layout {
+    grid-template-columns: minmax(160px, 200px) minmax(0, 1fr) minmax(260px, 300px);
+    gap: 12px;
+  }
+  .edit-panel { min-width: 0; }
+  .col-album { display: none; }
+  .file-toolbar-actions {
+    flex: 1 1 100%;
+    justify-content: flex-start;
+  }
+}
+
 @media (max-width: 1100px) {
   .tag-page { height: auto; max-height: none; overflow: visible; }
   .tag-layout {
@@ -2043,13 +2769,49 @@ tr.playing .play-btn {
     min-height: auto;
     gap: 12px;
   }
-  .dir-panel, .edit-panel, .file-panel {
+  .dir-panel, .file-panel {
     overflow: visible;
     min-height: auto;
   }
-  .dir-tree { max-height: 200px; }
-  .table-wrap { max-height: 50vh; }
-  .edit-panel { order: 3; }
+  .dir-tree { max-height: 180px; }
+  .desktop-file-table { display: none; }
+
+  /* 窄屏：编辑区改为底部抽屉，避免滚到屏外「看不到」 */
+  .edit-sheet-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 1250;
+    background: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(2px);
+  }
+  .edit-panel {
+    display: none;
+    order: unset;
+    min-width: 0;
+    overflow: hidden;
+  }
+  .edit-panel.sheet-open {
+    display: flex;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: var(--player-height, 64px);
+    z-index: 1260;
+    width: 100%;
+    max-height: min(88dvh, calc(100dvh - var(--player-height, 64px) - 8px));
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    border-left: none;
+    border-top: 1px solid var(--border-light);
+    box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.35);
+    padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+  }
+  .edit-panel.sheet-open .edit-form {
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .edit-empty { display: none; }
+
   .fetch-body { grid-template-columns: 1fr; }
   .fetch-list { border-right: none; border-bottom: 1px solid var(--border); max-height: 220px; }
 }
@@ -2070,16 +2832,30 @@ tr.playing .play-btn {
   .file-toolbar {
     gap: 6px;
   }
-  .filter-input {
-    width: 132px;
-    min-width: 132px;
+  .filter-input-wrap {
+    flex: 1 1 100%;
+    min-width: 0;
   }
-  .table-wrap {
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
+  .file-toolbar-info {
+    flex: 1 1 auto;
+    justify-content: flex-start;
+    order: 2;
   }
-  table {
-    min-width: 560px;
+  .file-toolbar-meta {
+    flex: 1 1 auto;
+    order: 3;
+  }
+  .file-toolbar-actions {
+    order: 4;
+  }
+  .file-toolbar-actions .btn-ghost {
+    flex: 1 1 calc(50% - 6px);
+    min-width: 0;
+    justify-content: center;
+  }
+  .edit-panel.sheet-open {
+    bottom: calc(var(--player-height) + var(--mobile-nav-height));
+    max-height: min(85dvh, calc(100dvh - var(--player-height) - var(--mobile-nav-height) - 8px));
   }
   .edit-form {
     display: flex;

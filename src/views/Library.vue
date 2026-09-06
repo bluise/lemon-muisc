@@ -292,7 +292,7 @@
           <button type="button" class="btn-ghost btn-sm" @click="showDupModal = false">关闭</button>
         </div>
         <p class="dup-summary">
-          共 {{ dupResult.groupCount || 0 }} 组、{{ dupResult.fileCount || 0 }} 个文件（同标题+歌手）
+          共 {{ dupResult.groupCount || 0 }} 组、{{ dupResult.fileCount || 0 }} 个文件（同歌名+歌手，优先按文件名）
         </p>
         <div v-if="!(dupResult.groups || []).length" class="dup-empty">未发现重复曲目</div>
         <div v-else class="dup-list">

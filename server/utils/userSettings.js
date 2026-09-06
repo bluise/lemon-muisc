@@ -50,6 +50,7 @@ export const USER_SETTING_KEYS = new Set([
   'download.usePersonalSavePath',
   'download.savePathPersonal',
   'source.active',
+  'tag.matchConcurrency',
 ])
 
 export function isGlobalSettingKey(key) {

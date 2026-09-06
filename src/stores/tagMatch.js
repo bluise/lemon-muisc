@@ -3,6 +3,20 @@ import { api } from '../api.js'
 import { refreshPlayingLocalMeta } from './player.js'
 import { updateLibraryTracksFromFiles } from './library.js'
 
+/** 默认并行路数；实际以设置「标签匹配并发」为准 */
+export const TAG_MATCH_CONCURRENCY_DEFAULT = 3
+export const TAG_MATCH_CONCURRENCY_MIN = 1
+export const TAG_MATCH_CONCURRENCY_MAX = 6
+
+export function normalizeTagMatchConcurrency(value) {
+  const n = parseInt(value, 10)
+  if (!Number.isFinite(n)) return TAG_MATCH_CONCURRENCY_DEFAULT
+  return Math.min(TAG_MATCH_CONCURRENCY_MAX, Math.max(TAG_MATCH_CONCURRENCY_MIN, n))
+}
+
+/** @deprecated 兼容旧引用，请用 normalizeTagMatchConcurrency / 设置项 */
+export const TAG_MATCH_CONCURRENCY = TAG_MATCH_CONCURRENCY_DEFAULT
+
 export const tagMatchRunning = ref(false)
 export const tagMatchProgress = ref({ done: 0, total: 0, current: '' })
 /** @type {import('vue').Ref<Record<string, object>>} */
@@ -57,10 +71,9 @@ export function syncFilesFromMatchPatches(files) {
 }
 
 function rememberPatch(filePath, meta) {
-  tagMatchPatches.value = {
-    ...tagMatchPatches.value,
-    [filePath]: { ...meta },
-  }
+  // 先原地写入再替换引用，避免并行完成时互相覆盖丢失 patch
+  tagMatchPatches.value[filePath] = { ...meta }
+  tagMatchPatches.value = { ...tagMatchPatches.value }
   tagMatchPatchVersion.value += 1
 }
 
@@ -88,17 +101,41 @@ async function saveMatchMetaToDisk(filePath, meta) {
   return Boolean(row?.ok)
 }
 
+async function mapWithConcurrency(items, limit, mapper) {
+  if (!items.length) return
+  const concurrency = Math.max(1, Math.min(limit, items.length))
+  let next = 0
+  async function worker() {
+    while (next < items.length) {
+      const index = next++
+      await mapper(items[index], index)
+    }
+  }
+  await Promise.all(Array.from({ length: concurrency }, worker))
+}
+
 /**
- * 后台批量自动匹配（切换页面不中断）
+ * 后台批量自动匹配（有限并发；切换页面不中断）
  * @returns {Promise<{ ok: boolean, reason?: string }>}
  */
 export async function startTagMatchBatch(targets, source) {
   if (!targets?.length) return { ok: false, reason: 'empty' }
   if (tagMatchRunning.value) return { ok: false, reason: 'busy' }
 
+  let concurrency = TAG_MATCH_CONCURRENCY_DEFAULT
+  try {
+    const s = await api.settings.get()
+    concurrency = normalizeTagMatchConcurrency(s['tag.matchConcurrency'])
+  } catch {}
+
+  const workers = Math.min(concurrency, targets.length)
   tagMatchRunning.value = true
   tagMatchResult.value = null
-  tagMatchProgress.value = { done: 0, total: targets.length, current: '' }
+  tagMatchProgress.value = {
+    done: 0,
+    total: targets.length,
+    current: `并行 ${workers} 路…`,
+  }
 
   let ok = 0
   let fail = 0
@@ -106,14 +143,13 @@ export async function startTagMatchBatch(targets, source) {
   let saveFail = 0
   let withCover = 0
   let withLyric = 0
+  let done = 0
   const savedLibraryFiles = []
 
   try {
-    for (let i = 0; i < targets.length; i++) {
-      const sel = targets[i]
+    await mapWithConcurrency(targets, concurrency, async (sel) => {
       tagMatchProgress.value = {
-        done: i,
-        total: targets.length,
+        ...tagMatchProgress.value,
         current: sel.fileName || '',
       }
 
@@ -168,19 +204,20 @@ export async function startTagMatchBatch(targets, source) {
         fail++
       }
 
+      done += 1
       tagMatchProgress.value = {
-        done: i + 1,
+        done,
         total: targets.length,
         current: sel.fileName || '',
       }
-    }
+    })
 
     if (savedLibraryFiles.length) updateLibraryTracksFromFiles(savedLibraryFiles)
 
     let text = ''
     let type = 'info'
     if (ok && !fail && !saveFail) {
-      text = `自动匹配并保存 ${saved} 个文件（封面 ${withCover}，歌词 ${withLyric}）`
+      text = `自动匹配并保存 ${saved} 个文件（封面 ${withCover}，歌词 ${withLyric}，并行 ${workers} 路）`
       type = 'success'
     } else if (ok) {
       const parts = [`匹配 ${ok}`]

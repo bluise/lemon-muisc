@@ -5,13 +5,26 @@
 
 面向飞牛 NAS 与自托管环境的 **Web 音乐工具**：多平台搜索、歌单发现、在线试听、批量下载、本地标签管理。兼容落雪音乐（LX Music）自定义音源脚本，在浏览器中即可完成「找歌 → 试听 → 下载 → 整理」全流程。
 
-当前版本：**v1.2.8** · 开源协议：**[MIT](LICENSE)**  
+当前版本：**v1.2.9** · 开源协议：**[MIT](LICENSE)**  
 飞牛应用中心显示名：**柠檬音乐**（浏览器标题仍为「柠檬音乐下载」）  
 仓库：[https://github.com/jia070310/lemon-muisc](https://github.com/jia070310/lemon-muisc)
 
 飞牛 FPK 为**独立原生应用**，不再依赖 Docker。运行时使用应用中心 **Node.js v22**。
 
-### v1.2.8 亮点
+### v1.2.9 亮点
+
+**标签编辑加强**
+
+- 手机 / 窄屏自适应（卡片列表 + 底部编辑抽屉）；工具栏不再被挤没
+- **手动检测**内嵌标签是否与按文件名搜索结果一致，标黄并可一键改（含封面 / 歌词）
+- **按文件名重设全部**；批量匹配可调并发（设置 → 音源管理，1–6 路）
+- 保存防护：默认只保存当前曲，避免全选误覆盖
+
+**查重更准**
+
+- 优先按文件名解析的歌名 / 歌手分组，减少错误标签误报
+
+### v1.2.8 回顾
 
 **试听 / 下载：识别短片段并自动换路**
 
@@ -288,7 +301,7 @@ CONFIG_PATH=/vol1/@appconf/lemon-music/config npm run auth:reset-users -- --yes
 npm run fpk:build
 ```
 
-生成 `fpk/lemon-music-1.2.8-x86.fpk` 与 `fpk/lemon-music-1.2.8-arm.fpk`（版本以 `fpk/manifest` 为准）。说明见 [docs/fpk-install.md](docs/fpk-install.md)。
+生成 `fpk/lemon-music-1.2.9-x86.fpk` 与 `fpk/lemon-music-1.2.9-arm.fpk`（版本以 `fpk/manifest` 为准）。说明见 [docs/fpk-install.md](docs/fpk-install.md)。
 
 无上报测试包：`npm run fpk:build:no-telemetry`。
 

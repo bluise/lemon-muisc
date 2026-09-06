@@ -124,22 +124,45 @@ libraryRouter.post('/scan-batch', async (req, res) => {
   }
 })
 
-/** 检测重复曲目（同标题+歌手，忽略大小写与空白） */
+/** 规范化查重字段：小写、压缩空白 */
+function normalizeDupField(value) {
+  return String(value || '').trim().toLowerCase().replace(/\s+/g, ' ')
+}
+
+/**
+ * 查重身份：优先文件名解析的标题/歌手。
+ * 内嵌标签常被批量写错（多首共用同一 title），会导致不同文件名被误判为重复。
+ */
+function resolveDupIdentity(track) {
+  const parsedTitle = normalizeDupField(track.parsedTitle)
+  const parsedArtist = normalizeDupField(track.parsedArtist)
+  const tagTitle = normalizeDupField(track.title)
+  const tagArtist = normalizeDupField(track.artist)
+  const title = parsedTitle || tagTitle
+  const artist = parsedArtist || tagArtist
+  return {
+    title,
+    artist,
+    displayTitle: track.parsedTitle || track.title || '',
+    displayArtist: track.parsedArtist || track.artist || '',
+  }
+}
+
+/** 检测重复曲目（同标题+歌手；优先文件名解析，忽略大小写与空白） */
 libraryRouter.get('/duplicates', (_req, res) => {
   try {
     const tracks = getAllCachedTracks() || []
     const groups = new Map()
     for (const t of tracks) {
-      const title = String(t.title || t.parsedTitle || '').trim().toLowerCase()
-      const artist = String(t.artist || t.parsedArtist || '').trim().toLowerCase()
-      if (!title) continue
-      const key = `${title}\n${artist}`
+      const id = resolveDupIdentity(t)
+      if (!id.title) continue
+      const key = `${id.title}\n${id.artist}`
       if (!groups.has(key)) groups.set(key, [])
       groups.get(key).push({
         filePath: t.filePath,
         fileName: t.fileName,
-        title: t.title || t.parsedTitle || '',
-        artist: t.artist || t.parsedArtist || '',
+        title: id.displayTitle || t.title || '',
+        artist: id.displayArtist || t.artist || '',
         album: t.album || '',
         duration: t.duration || 0,
         bitrate: t.bitrate || 0,

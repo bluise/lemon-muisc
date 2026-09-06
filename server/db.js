@@ -123,6 +123,7 @@ export function initDB(configPath) {
     'music.paths': '[]',
     'tag.dirs': '[]',
     'tag.matchSource': 'kg',
+    'tag.matchConcurrency': '3',
     'mail.enabled': 'false',
     'mail.smtp.host': '',
     'mail.smtp.port': '465',

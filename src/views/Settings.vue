@@ -420,6 +420,20 @@
       <div v-if="activeTab === 'source'" class="panel-body">
         <p v-if="isAdminUser" class="source-tip">支持同时激活多个音源（落雪兼容 / 澜音原生 .js）。每个账号的激活状态相互独立；试听 / 下载时按平台匹配，同一平台有多个音源时优先使用最近激活的。系统会根据近期播放/下载是否为「试听片段」评估音源健康度；聚合音源若部分平台完整、部分多为试听，会单独标注。试听检测到短片段时会自动换音源/其它平台，并累计学习各平台是否可用。</p>
         <p v-else class="source-tip">音源脚本由管理员导入。你可以自行激活或停用音源，状态仅对自己生效。列表旁的健康标注来自本机近期播放/下载是否多为试听片段（含「部分平台试听」）；试听遇短片段会自动尝试其它音源或平台。</p>
+        <div class="setting-item">
+          <div class="setting-item-info">
+            <div class="setting-item-label">标签匹配并发</div>
+            <div class="setting-item-desc">按文件名批量匹配 / 重设时同时处理的文件数。越高越快，过高可能被音源限流</div>
+          </div>
+          <div class="setting-item-action">
+            <AppSelect
+              v-model="settings['tag.matchConcurrency']"
+              :options="tagMatchConcurrencyOptions"
+              min-width="100px"
+              @change="saveTagMatchConcurrency"
+            />
+          </div>
+        </div>
         <div v-if="isAdminUser" class="setting-item">
           <div class="setting-item-info">
             <div class="setting-item-label">音源切换方式</div>
@@ -960,6 +974,10 @@ const fileNameOptions = [
 const maxDownloadOptions = Array.from({ length: 6 }, (_, i) => ({
   value: String(i + 1),
   label: String(i + 1),
+}))
+const tagMatchConcurrencyOptions = Array.from({ length: 6 }, (_, i) => ({
+  value: String(i + 1),
+  label: `${i + 1} 路`,
 }))
 const downloadGroupOptions = [
   { value: 'none', label: '不分组' },
@@ -1700,6 +1718,8 @@ onMounted(async () => {
     const s = await api.settings.get()
     Object.assign(settings, s)
     activeSourceIds.value = parseActiveIds(settings['source.active'])
+    if (!settings['tag.matchConcurrency']) settings['tag.matchConcurrency'] = '3'
+    else settings['tag.matchConcurrency'] = String(Math.min(6, Math.max(1, parseInt(settings['tag.matchConcurrency'], 10) || 3)))
     if (!settings['player.coverStyle']) settings['player.coverStyle'] = 'disc'
     if (settings['player.visualizer'] == null) settings['player.visualizer'] = 'true'
     if (!settings[THEME_KEY]) settings[THEME_KEY] = currentTheme.value
@@ -1983,6 +2003,12 @@ async function saveSourceFallbackMode() {
   if (!settings[SOURCE_FALLBACK_MODE_KEY]) settings[SOURCE_FALLBACK_MODE_KEY] = 'auto'
   applySourceFallbackMode(settings[SOURCE_FALLBACK_MODE_KEY])
   await saveSetting(SOURCE_FALLBACK_MODE_KEY)
+}
+
+async function saveTagMatchConcurrency() {
+  const n = Math.min(6, Math.max(1, parseInt(settings['tag.matchConcurrency'], 10) || 3))
+  settings['tag.matchConcurrency'] = String(n)
+  await saveSetting('tag.matchConcurrency')
 }
 
 async function saveDownloadGroupBy() {
