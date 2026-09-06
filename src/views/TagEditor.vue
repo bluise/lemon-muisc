@@ -87,7 +87,38 @@
               <button class="btn-ghost btn-sm meta-stop" @click="cancelMetaLoad">停止</button>
             </span>
             <span v-if="matching" class="meta-progress match-progress" :title="matchProgress.current">
-              匹配并保存 {{ matchProgress.done }}/{{ matchProgress.total }}<template v-if="matchProgress.current"> · {{ matchProgress.current }}</template>
+              {{ matchPaused ? '已暂停' : '匹配并保存' }}
+              {{ matchProgress.done }}/{{ matchProgress.total }}<template v-if="matchProgress.current"> · {{ matchProgress.current }}</template>
+              <button
+                v-if="!matchPaused"
+                class="btn-ghost btn-sm meta-stop"
+                type="button"
+                @click="pauseTagMatch"
+              >暂停</button>
+              <button
+                v-else
+                class="btn-ghost btn-sm meta-stop"
+                type="button"
+                @click="resumeTagMatch"
+              >继续</button>
+              <button class="btn-ghost btn-sm meta-stop" type="button" @click="stopTagMatch">停止</button>
+            </span>
+            <span v-if="tagChecking" class="meta-progress match-progress" :title="tagCheckProgress.current">
+              {{ tagCheckPaused ? '检测已暂停' : '手动检测' }}
+              {{ tagCheckProgress.done }}/{{ tagCheckProgress.total }}<template v-if="tagCheckProgress.current"> · {{ tagCheckProgress.current }}</template>
+              <button
+                v-if="!tagCheckPaused"
+                class="btn-ghost btn-sm meta-stop"
+                type="button"
+                @click="pauseManualTagCheck"
+              >暂停</button>
+              <button
+                v-else
+                class="btn-ghost btn-sm meta-stop"
+                type="button"
+                @click="resumeManualTagCheck"
+              >继续</button>
+              <button class="btn-ghost btn-sm meta-stop" type="button" @click="stopManualTagCheck">停止</button>
             </span>
           </div>
           <div class="file-toolbar-meta">
@@ -112,10 +143,10 @@
             <button class="btn-ghost btn-sm" :disabled="!displayedFiles.length" @click="playAllVisible">
               试听全部
             </button>
-            <button class="btn-ghost btn-sm" :disabled="!missingFilesCount || matching" @click="selectMissingFiles">
+            <button class="btn-ghost btn-sm" :disabled="!missingFilesCount || matching || tagChecking" @click="selectMissingFiles">
               选中缺失
             </button>
-            <button class="btn-ghost btn-sm" :disabled="!missingFilesCount || matching" @click="autoMatchMissing">
+            <button class="btn-ghost btn-sm" :disabled="!missingFilesCount || matching || tagChecking" @click="autoMatchMissing">
               {{ matching ? '匹配中...' : `匹配缺失 (${missingMatchCount})` }}
             </button>
             <button class="btn-ghost btn-sm" :disabled="!selectedFiles.length || matching || tagChecking" @click="autoMatchSelected">
@@ -123,11 +154,11 @@
             </button>
             <button
               class="btn-ghost btn-sm"
-              :disabled="!files.length || matching || tagChecking"
-              title="按文件名搜索并为当前文件夹全部文件重写标签/封面/歌词，直接保存到磁盘"
-              @click="autoRematchAllByFilename"
+              :disabled="!selectedFiles.length || matching || tagChecking"
+              title="按文件名搜索并为勾选的文件重写标签/封面/歌词，直接保存到磁盘"
+              @click="autoRematchSelectedByFilename"
             >
-              {{ matching ? '匹配中...' : `按文件名重设全部 (${files.length})` }}
+              {{ matching ? '匹配中...' : `按文件名重设 (${selectedFiles.length})` }}
             </button>
             <button
               class="btn-ghost btn-sm"
@@ -145,8 +176,11 @@
             />
           </div>
         </div>
-        <div v-if="matching && matchProgress.total" class="match-progress-bar">
-          <div class="match-progress-fill" :style="{ width: matchPercent + '%' }" />
+        <div v-if="(matching && matchProgress.total) || (tagChecking && tagCheckProgress.total)" class="match-progress-bar">
+          <div
+            class="match-progress-fill"
+            :style="{ width: (matching ? matchPercent : tagCheckPercent) + '%' }"
+          />
         </div>
 
         <template v-if="displayedFiles.length">
@@ -584,11 +618,15 @@ import {
 } from '../stores/player.js'
 import {
   tagMatchRunning,
+  tagMatchPaused,
   tagMatchProgress,
   tagMatchPercent,
   tagMatchPatchVersion,
   tagMatchResult,
   startTagMatchBatch,
+  pauseTagMatch,
+  resumeTagMatch,
+  stopTagMatch,
   syncFilesFromMatchPatches,
   saveTagEditorSession,
   tagEditorSession,
@@ -611,6 +649,7 @@ const missingFilterOptions = [
 ]
 
 const matching = tagMatchRunning
+const matchPaused = tagMatchPaused
 const matchProgress = tagMatchProgress
 const matchPercent = tagMatchPercent
 const dirs = ref([])
@@ -641,9 +680,43 @@ const metaProgress = ref({ done: 0, total: 0 })
 const metaLoadToken = ref(0)
 const isCompactLayout = ref(false)
 const tagChecking = ref(false)
+const tagCheckPaused = ref(false)
+const tagCheckStopRequested = ref(false)
+const tagCheckProgress = ref({ done: 0, total: 0, current: '' })
+const tagCheckPercent = computed(() => {
+  const { done, total } = tagCheckProgress.value
+  if (!total) return 0
+  return Math.min(100, Math.round((done / total) * 100))
+})
 const tagCheckApplying = ref(false)
 const tagCheckResult = ref(null)
 let compactMq = null
+
+function sleepMs(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+async function waitManualTagCheckGate() {
+  while (tagCheckPaused.value && !tagCheckStopRequested.value) {
+    await sleepMs(120)
+  }
+  return tagCheckStopRequested.value
+}
+
+function pauseManualTagCheck() {
+  if (!tagChecking.value) return
+  tagCheckPaused.value = true
+}
+
+function resumeManualTagCheck() {
+  tagCheckPaused.value = false
+}
+
+function stopManualTagCheck() {
+  if (!tagChecking.value) return
+  tagCheckStopRequested.value = true
+  tagCheckPaused.value = false
+}
 
 function syncCompactLayout() {
   isCompactLayout.value = Boolean(compactMq?.matches)
@@ -1103,6 +1176,10 @@ function selectMissingFiles() {
 
 function runTagMatch(targets) {
   if (!targets.length) return
+  if (tagChecking.value) {
+    showToast('请先等待或停止手动检测', 'info')
+    return
+  }
   startTagMatchBatch(
     targets.map(f => ({ filePath: f.filePath, fileName: f.fileName })),
     fetchSource.value,
@@ -1124,11 +1201,11 @@ function autoMatchMissing() {
   runTagMatch(targets)
 }
 
-/** 按文件名重新搜索，覆盖重写当前文件夹全部文件的标签/封面/歌词并落盘 */
-function autoRematchAllByFilename() {
-  const targets = files.value
+/** 按文件名重新搜索，覆盖重写勾选文件的标签/封面/歌词并落盘 */
+function autoRematchSelectedByFilename() {
+  const targets = selectedFiles.value
   if (!targets.length) {
-    showToast('当前没有可重设的文件', 'info')
+    showToast('请先勾选要重设的文件', 'info')
     return
   }
   if (matching.value) {
@@ -1137,7 +1214,7 @@ function autoRematchAllByFilename() {
   }
   const srcLabel = sourceOptions.find(o => o.value === fetchSource.value)?.label || fetchSource.value
   const ok = window.confirm(
-    `将按文件名重新搜索（音源：${srcLabel}），并为当前文件夹共 ${targets.length} 个文件重写：\n`
+    `将按文件名重新搜索（音源：${srcLabel}），并为已勾选的 ${targets.length} 个文件重写：\n`
     + `标题、歌手、专辑、封面、歌词等，并直接保存到磁盘。\n\n`
     + `现有标签会被覆盖。确定继续？`,
   )
@@ -1414,15 +1491,31 @@ async function runManualTagCheck() {
     showToast('请先选择要检测的文件', 'info')
     return
   }
+  if (tagChecking.value) {
+    showToast('检测进行中', 'info')
+    return
+  }
+  if (matching.value) {
+    showToast('请先等待或停止匹配任务', 'info')
+    return
+  }
   tagChecking.value = true
+  tagCheckPaused.value = false
+  tagCheckStopRequested.value = false
+  tagCheckProgress.value = { done: 0, total: 1, current: f.fileName || '' }
   try {
     const result = await inspectFileTagAccuracy(f, {
       title: editForm.value.title,
       artist: editForm.value.artist,
       album: editForm.value.album,
     })
+    if (tagCheckStopRequested.value) {
+      showToast('已停止检测', 'info')
+      return
+    }
     tagCheckResult.value = result
     applyInspectResultToFile(f, result)
+    tagCheckProgress.value = { done: 1, total: 1, current: f.fileName || '' }
     if (result.reason === 'parse') showToast('无法从文件名解析歌手/歌名', 'info')
     else if (result.reason === 'no-match') showToast('按文件名未搜到结果，可换音源重试', 'info')
     else if (result.ok) showToast('检测通过：标签与搜索结果一致', 'success')
@@ -1431,6 +1524,9 @@ async function runManualTagCheck() {
     showToast(e.message || '检测失败', 'error')
   } finally {
     tagChecking.value = false
+    tagCheckPaused.value = false
+    tagCheckStopRequested.value = false
+    tagCheckProgress.value = { done: 0, total: 0, current: '' }
   }
 }
 
@@ -1446,12 +1542,30 @@ async function runManualTagCheckSelected() {
     showToast('请先选择要检测的文件', 'info')
     return
   }
+  if (tagChecking.value) {
+    showToast('检测进行中', 'info')
+    return
+  }
+  if (matching.value) {
+    showToast('请先等待或停止匹配任务', 'info')
+    return
+  }
   tagChecking.value = true
+  tagCheckPaused.value = false
+  tagCheckStopRequested.value = false
+  tagCheckProgress.value = { done: 0, total: targets.length, current: '' }
   let bad = 0
   let good = 0
   let skip = 0
+  let done = 0
   try {
     for (const f of targets) {
+      if (await waitManualTagCheckGate()) break
+      tagCheckProgress.value = {
+        done,
+        total: targets.length,
+        current: f.fileName || '',
+      }
       const snapshot = (editingFile.value?.filePath === f.filePath && editForm.value)
         ? {
             title: editForm.value.title,
@@ -1460,19 +1574,31 @@ async function runManualTagCheckSelected() {
           }
         : null
       const result = await inspectFileTagAccuracy(f, snapshot)
+      if (tagCheckStopRequested.value) break
       applyInspectResultToFile(f, result)
       if (editingFile.value?.filePath === f.filePath) tagCheckResult.value = result
       if (result.reason === 'parse' || result.reason === 'no-match') skip += 1
       else if (result.ok) good += 1
       else bad += 1
+      done += 1
+      tagCheckProgress.value = {
+        done,
+        total: targets.length,
+        current: f.fileName || '',
+      }
     }
-    if (bad) showToast(`检测完成：${bad} 首标签可能不正确，${good} 首通过`, 'info')
+    if (tagCheckStopRequested.value) {
+      showToast(`已停止检测（${done}/${targets.length}）：不正确 ${bad}，通过 ${good}`, 'info')
+    } else if (bad) showToast(`检测完成：${bad} 首标签可能不正确，${good} 首通过`, 'info')
     else if (good) showToast(`检测完成：${good} 首通过` + (skip ? `，${skip} 首无法判定` : ''), 'success')
     else showToast(`检测完成：${skip} 首无法判定（文件名或搜索）`, 'info')
   } catch (e) {
     showToast(e.message || '检测失败', 'error')
   } finally {
     tagChecking.value = false
+    tagCheckPaused.value = false
+    tagCheckStopRequested.value = false
+    tagCheckProgress.value = { done: 0, total: 0, current: '' }
   }
 }
 

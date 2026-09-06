@@ -18,12 +18,15 @@ export function normalizeTagMatchConcurrency(value) {
 export const TAG_MATCH_CONCURRENCY = TAG_MATCH_CONCURRENCY_DEFAULT
 
 export const tagMatchRunning = ref(false)
+export const tagMatchPaused = ref(false)
 export const tagMatchProgress = ref({ done: 0, total: 0, current: '' })
 /** @type {import('vue').Ref<Record<string, object>>} */
 export const tagMatchPatches = ref({})
 export const tagMatchPatchVersion = ref(0)
 /** @type {import('vue').Ref<{ text: string, type: string } | null>} */
 export const tagMatchResult = ref(null)
+
+let tagMatchStopRequested = false
 
 /** 离开标签页时保留列表状态，便于匹配进行中返回查看 */
 export const tagEditorSession = ref({ activeDir: '', files: [] })
@@ -44,6 +47,21 @@ export const tagMatchPercent = computed(() => {
   if (!total) return 0
   return Math.min(100, Math.round((done / total) * 100))
 })
+
+export function pauseTagMatch() {
+  if (!tagMatchRunning.value) return
+  tagMatchPaused.value = true
+}
+
+export function resumeTagMatch() {
+  tagMatchPaused.value = false
+}
+
+export function stopTagMatch() {
+  if (!tagMatchRunning.value) return
+  tagMatchStopRequested = true
+  tagMatchPaused.value = false
+}
 
 export function applyMatchMetaToFile(file, meta) {
   if (!file || !meta) return
@@ -101,13 +119,28 @@ async function saveMatchMetaToDisk(filePath, meta) {
   return Boolean(row?.ok)
 }
 
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+/** @returns {Promise<boolean>} true = 应停止 */
+async function waitWhilePausedOrStop() {
+  while (tagMatchPaused.value && !tagMatchStopRequested) {
+    await sleep(120)
+  }
+  return tagMatchStopRequested
+}
+
 async function mapWithConcurrency(items, limit, mapper) {
   if (!items.length) return
   const concurrency = Math.max(1, Math.min(limit, items.length))
   let next = 0
   async function worker() {
-    while (next < items.length) {
+    while (true) {
+      if (await waitWhilePausedOrStop()) return
       const index = next++
+      if (index >= items.length) return
+      if (tagMatchStopRequested) return
       await mapper(items[index], index)
     }
   }
@@ -115,8 +148,8 @@ async function mapWithConcurrency(items, limit, mapper) {
 }
 
 /**
- * 后台批量自动匹配（有限并发；切换页面不中断）
- * @returns {Promise<{ ok: boolean, reason?: string }>}
+ * 后台批量自动匹配（有限并发；切换页面不中断；支持暂停 / 停止）
+ * @returns {Promise<{ ok: boolean, reason?: string, stopped?: boolean }>}
  */
 export async function startTagMatchBatch(targets, source) {
   if (!targets?.length) return { ok: false, reason: 'empty' }
@@ -129,6 +162,8 @@ export async function startTagMatchBatch(targets, source) {
   } catch {}
 
   const workers = Math.min(concurrency, targets.length)
+  tagMatchStopRequested = false
+  tagMatchPaused.value = false
   tagMatchRunning.value = true
   tagMatchResult.value = null
   tagMatchProgress.value = {
@@ -214,9 +249,17 @@ export async function startTagMatchBatch(targets, source) {
 
     if (savedLibraryFiles.length) updateLibraryTracksFromFiles(savedLibraryFiles)
 
+    const stopped = tagMatchStopRequested
     let text = ''
     let type = 'info'
-    if (ok && !fail && !saveFail) {
+    if (stopped) {
+      const parts = [`已停止（${done}/${targets.length}）`]
+      if (ok) parts.push(`匹配 ${ok}`)
+      if (saved) parts.push(`已保存 ${saved}`)
+      if (fail) parts.push(`失败 ${fail}`)
+      text = parts.join('，')
+      type = 'info'
+    } else if (ok && !fail && !saveFail) {
       text = `自动匹配并保存 ${saved} 个文件（封面 ${withCover}，歌词 ${withLyric}，并行 ${workers} 路）`
       type = 'success'
     } else if (ok) {
@@ -232,12 +275,14 @@ export async function startTagMatchBatch(targets, source) {
       type = 'error'
     }
     tagMatchResult.value = { text, type }
-    return { ok: true }
+    return { ok: true, stopped }
   } catch (e) {
     tagMatchResult.value = { text: e.message || '自动匹配失败', type: 'error' }
     return { ok: false, reason: 'error' }
   } finally {
     tagMatchRunning.value = false
+    tagMatchPaused.value = false
+    tagMatchStopRequested = false
     tagMatchProgress.value = { done: 0, total: 0, current: '' }
   }
 }
