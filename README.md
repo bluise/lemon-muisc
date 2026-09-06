@@ -42,7 +42,7 @@
 **标签与隐私**
 
 - FLAC / ID3 标签保存更稳（合并注释、封面不误删）；列表封面缩略图
-- 日活统计可选；上报地址仅本地文件或 `TELEMETRY_URL` / `TELEMETRY_SECRET`，**不进公开仓库**；`npm run fpk:build` 本机注入后再发 Release
+- 日活统计可选；上报地址仅本地文件或 `TELEMETRY_URL` / `TELEMETRY_SECRET`，
 
 ---
 
