@@ -100,18 +100,6 @@ async function kgSearchComplex(keyword, page = 1, limit = 30) {
   return buildKgSearchResult(lists.map(mapKgWebSearchItem), data.data.total || 0, limit)
 }
 
-async function kgSearch(keyword, page = 1, limit = 30) {
-  const results = await Promise.allSettled([
-    kgSearchMobile(keyword, page, limit),
-    kgSearchWeb(keyword, page, limit),
-    kgSearchComplex(keyword, page, limit),
-  ])
-  for (const result of results) {
-    if (result.status === 'fulfilled' && result.value?.list?.length) return result.value
-  }
-  return { list: [], allPage: 0, total: 0 }
-}
-
 // --- QQ音乐 tx ---
 async function txSearch(keyword, page = 1, limit = 30) {
   const buf = await req('get',
@@ -217,12 +205,59 @@ function kwPicUrl(item) {
 }
 
 function kgPicUrl(item) {
-  let img = item.Image || item.AlbumImage || item.album_img
+  let img = item.Image || item.AlbumImage || item.album_img || item.imgurl
     || item.album_info?.sizable_cover || item.cover || item.img || item.pic || ''
   if (typeof img === 'string' && img) {
     return img.replace(/\{size\}/g, '400')
   }
   return ''
+}
+
+/** 移动端搜歌常无封面；用同批 web/complex 结果按 hash 补 pic */
+function enrichKgListCovers(primaryList, ...coverSources) {
+  if (!Array.isArray(primaryList) || !primaryList.length) return primaryList
+  const coverByHash = new Map()
+  for (const list of coverSources) {
+    if (!Array.isArray(list)) continue
+    for (const song of list) {
+      const h = String(song?.hash || song?.id || '').toLowerCase()
+      const pic = song?.picUrl || song?.img || ''
+      if (h && pic && !coverByHash.has(h)) coverByHash.set(h, pic)
+    }
+  }
+  if (!coverByHash.size) return primaryList
+  return primaryList.map((song) => {
+    if (song.picUrl || song.img) return song
+    const pic = coverByHash.get(String(song.hash || song.id || '').toLowerCase())
+    if (!pic) return song
+    return { ...song, picUrl: pic, img: pic }
+  })
+}
+
+async function kgSearch(keyword, page = 1, limit = 30) {
+  const results = await Promise.allSettled([
+    kgSearchMobile(keyword, page, limit),
+    kgSearchWeb(keyword, page, limit),
+    kgSearchComplex(keyword, page, limit),
+  ])
+  const settled = results.map((r) => (r.status === 'fulfilled' ? r.value : null))
+  const [mobile, web, complex] = settled
+  const primary = [mobile, web, complex].find((r) => r?.list?.length)
+  if (!primary) return { list: [], allPage: 0, total: 0 }
+
+  const coverLists = settled
+    .filter((r) => r && r !== primary && r.list?.length)
+    .map((r) => r.list)
+  const list = enrichKgListCovers(primary.list, ...coverLists)
+  // 仍几乎无封面时，优先改用带 Image 的 web 列表（保证搜索页能显示）
+  const withPic = list.filter((s) => s.picUrl || s.img).length
+  if (withPic < Math.min(3, list.length) && web?.list?.length) {
+    const webFilled = enrichKgListCovers(web.list, primary.list, complex?.list)
+    if (webFilled.some((s) => s.picUrl || s.img)) {
+      return { ...web, list: webFilled }
+    }
+  }
+  return { ...primary, list }
 }
 
 function mgPicUrl(item) {
@@ -769,13 +804,17 @@ async function kgAlbum(id) {
     page += 1
   }
   if (!all.length) throw new Error('无法获取酷狗专辑')
+  const albumCover = String(albumInfo.imgurl || albumInfo.img || '').replace(/\{size\}/g, '400')
+  const list = albumCover
+    ? all.map((s) => (s.picUrl || s.img ? s : { ...s, picUrl: albumCover, img: albumCover }))
+    : all
   return {
-    list: all,
-    total: total || all.length,
+    list,
+    total: total || list.length,
     source: 'kg',
     info: {
       name: cleanHtml(albumInfo.albumname || albumInfo.name || ''),
-      img: (albumInfo.imgurl || albumInfo.img || '').replace('{size}', '400'),
+      img: albumCover,
       desc: cleanHtml(albumInfo.intro || albumInfo.description || ''),
       author: formatArtists(albumInfo.singername || albumInfo.author_name || ''),
       publishTime: albumInfo.publishtime || albumInfo.publish_date || '',

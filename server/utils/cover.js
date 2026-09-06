@@ -37,7 +37,7 @@ export function resolveCoverCandidates(info = {}) {
   }
 
   // 酷狗 {size}
-  for (const raw of [info.Image, info.AlbumImage, info.album_img, info.album_info?.sizable_cover]) {
+  for (const raw of [info.Image, info.AlbumImage, info.album_img, info.imgurl, info.album_info?.sizable_cover]) {
     if (typeof raw === 'string' && raw.includes('{size}')) {
       push(raw.replace(/\{size\}/g, '400'))
       push(raw.replace(/\{size\}/g, '480'))
