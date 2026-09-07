@@ -1,6 +1,6 @@
 import { requestSource, hasActiveSource } from '../sourceManager.js'
 import { getStoredActiveSourceIds } from './activeSources.js'
-import { getLyric, searchMusic } from '../musicSdk.js'
+import { getLyric, searchMusic, kgResolveAlbumCover } from '../musicSdk.js'
 import { lyricLookupExtra } from './musicInfo.js'
 import { resolveCoverCandidates } from './cover.js'
 import { fetchPicBuffer } from './fetchPic.js'
@@ -150,6 +150,14 @@ export async function fetchTrackCover({
   const src = isOnlineSource(merged.source || source) ? (merged.source || source) : ''
   const candidates = resolveCoverCandidates(merged)
   const allowIds = allowedSourceIds || (userId ? getStoredActiveSourceIds(userId) : null)
+
+  // 酷狗曲目常只有 albumId：按专辑接口补封面
+  if (!candidates.length && src === 'kg' && merged.albumId) {
+    try {
+      const albumCover = await kgResolveAlbumCover(merged.albumId)
+      if (albumCover) candidates.push(albumCover)
+    } catch {}
+  }
 
   if (asBuffer) {
     for (const url of candidates) {

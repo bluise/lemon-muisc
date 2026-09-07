@@ -50,7 +50,7 @@
               @click="$emit('download', q)"
             >{{ getQualityDisplay(q, item.types) }}</button>
           </template>
-          <div v-else class="quality-empty">暂无可用音质</div>
+          <div v-else class="quality-empty">该曲暂无可用音质（音源未返回）</div>
         </div>
       </div>
     </span>

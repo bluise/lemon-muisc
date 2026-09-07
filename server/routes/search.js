@@ -1,5 +1,5 @@
 ﻿import { Router } from 'express'
-import { searchMusic, searchAlbums, fetchAlbum } from '../musicSdk.js'
+import { searchMusic, searchAlbums, searchPlaylists, fetchAlbum } from '../musicSdk.js'
 import { getDisplaySources } from '../utils/displaySources.js'
 import { formatUserError } from '../utils/userError.js'
 import { createLimiter, withTimeout } from '../utils/asyncLimit.js'
@@ -39,6 +39,24 @@ searchRouter.get('/album', async (req, res) => {
     res.json({ ok: true, data: result })
   } catch (e) {
     res.status(500).json({ error: formatUserError(e, '专辑搜索失败，请稍后重试') })
+  }
+})
+
+searchRouter.get('/playlist', async (req, res) => {
+  try {
+    const { keyword, source = 'kw', page = 1, limit = 30 } = req.query
+    if (!keyword) return res.status(400).json({ error: '缺少搜索关键词' })
+    if (!availableSources(req)[source]) {
+      return res.status(400).json({ error: `不支持的搜索源: ${source}` })
+    }
+    const result = await searchLimiter(() => withTimeout(
+      searchPlaylists(keyword, source, Number(page), Number(limit)),
+      SEARCH_TIMEOUT_MS,
+      '歌单搜索超时，请稍后重试',
+    ))
+    res.json({ ok: true, data: result })
+  } catch (e) {
+    res.status(500).json({ error: formatUserError(e, '歌单搜索失败，请稍后重试') })
   }
 })
 

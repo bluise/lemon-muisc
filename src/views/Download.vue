@@ -186,9 +186,10 @@
 
 <script setup>
 defineOptions({ name: 'Download' })
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, onActivated } from 'vue'
 import { api } from '../api.js'
 import { onWS } from '../ws.js'
+import { appConfirm } from '../stores/appDialog.js'
 import {
   loadingPlay, isPaused, isPlayingItem, playItem, addToQueue, isInQueue,
 } from '../stores/player.js'
@@ -202,6 +203,102 @@ const retryingFailed = ref(false)
 const retryingTaskId = ref('')
 
 onMounted(() => loadList())
+onActivated(() => loadList())
+
+const unsubs = []
+const progressPending = new Map()
+let progressFlushTimer = null
+let missingTaskReloadTimer = null
+
+function scheduleReloadForMissingTask() {
+  if (missingTaskReloadTimer) return
+  missingTaskReloadTimer = setTimeout(() => {
+    missingTaskReloadTimer = null
+    loadList().catch(() => {})
+  }, 300)
+}
+
+function flushDownloadProgress() {
+  progressFlushTimer = null
+  for (const [id, data] of progressPending) {
+    const t = tasks.value.find(x => x.id === id)
+    if (!t) {
+      scheduleReloadForMissingTask()
+      continue
+    }
+    t.progress = data.progress
+    t.downloaded_size = data.downloaded
+    t.total_size = data.total
+    t.status = 'downloading'
+  }
+  progressPending.clear()
+}
+
+unsubs.push(onWS('download:added', (d) => {
+  const incoming = (d?.tasks || []).map(normalizeDownloadTask)
+  if (!incoming.length) return
+  const existing = new Set(tasks.value.map(t => t.id))
+  const fresh = incoming.filter(t => !existing.has(t.id))
+  if (!fresh.length) return
+  tasks.value = [...fresh, ...tasks.value]
+}))
+unsubs.push(onWS('download:progress', (d) => {
+  if (!d?.id) return
+  progressPending.set(d.id, {
+    progress: d.total > 0 ? d.downloaded / d.total : (d.progress ?? 0),
+    downloaded: d.downloaded,
+    total: d.total,
+  })
+  if (!progressFlushTimer) {
+    progressFlushTimer = setTimeout(flushDownloadProgress, 250)
+  }
+}))
+unsubs.push(onWS('download:status', (d) => {
+  const t = tasks.value.find(x => x.id === d.id)
+  if (!t) {
+    if (d?.id) scheduleReloadForMissingTask()
+    return
+  }
+  t.status = d.status
+  if (d.progress !== undefined) t.progress = d.progress
+  if (d.error !== undefined) t.error = d.error
+  if (d.quality) t.quality = d.quality
+  if (d.downgradeOffer !== undefined) {
+    t.meta = { ...(t.meta || {}), downgradeOffer: d.downgradeOffer }
+  }
+  if (d.existFileOffer !== undefined) {
+    t.meta = { ...(t.meta || {}), existFileOffer: d.existFileOffer }
+  }
+  if (d.filePath) t.file_path = d.filePath
+}))
+unsubs.push(onWS('download:removed', (d) => {
+  tasks.value = tasks.value.filter(x => x.id !== d.id)
+  if (d?.id && selectedIds.value.has(d.id)) {
+    const next = new Set(selectedIds.value)
+    next.delete(d.id)
+    selectedIds.value = next
+  }
+}))
+unsubs.push(onWS('download:cleared', (d) => {
+  if (d?.all) {
+    tasks.value = []
+    selectedIds.value = new Set()
+    return
+  }
+  tasks.value = tasks.value.filter(x => x.status !== 'completed')
+}))
+onUnmounted(() => {
+  if (progressFlushTimer) {
+    clearTimeout(progressFlushTimer)
+    progressFlushTimer = null
+  }
+  if (missingTaskReloadTimer) {
+    clearTimeout(missingTaskReloadTimer)
+    missingTaskReloadTimer = null
+  }
+  progressPending.clear()
+  unsubs.forEach(fn => fn())
+})
 
 const selectedCount = computed(() => selectedIds.value.size)
 const allSelected = computed(() => tasks.value.length > 0 && tasks.value.every(t => selectedIds.value.has(t.id)))
@@ -239,70 +336,6 @@ function isPreviewFail(task) {
   const msg = String(task.error || task.meta?.downgradeOffer?.reason || '')
   return /试听时长|试听片段|仅支持试听|PREVIEW_CLIP|时长不完整/i.test(msg)
 }
-
-const unsubs = []
-const progressPending = new Map()
-let progressFlushTimer = null
-
-function flushDownloadProgress() {
-  progressFlushTimer = null
-  for (const [id, data] of progressPending) {
-    const t = tasks.value.find(x => x.id === id)
-    if (!t) continue
-    t.progress = data.progress
-    t.downloaded_size = data.downloaded
-    t.total_size = data.total
-    t.status = 'downloading'
-  }
-  progressPending.clear()
-}
-
-unsubs.push(onWS('download:progress', (d) => {
-  if (!d?.id) return
-  progressPending.set(d.id, {
-    progress: d.total > 0 ? d.downloaded / d.total : (d.progress ?? 0),
-    downloaded: d.downloaded,
-    total: d.total,
-  })
-  if (!progressFlushTimer) {
-    progressFlushTimer = setTimeout(flushDownloadProgress, 250)
-  }
-}))
-unsubs.push(onWS('download:status', (d) => {
-  const t = tasks.value.find(x => x.id === d.id)
-  if (t) {
-    t.status = d.status
-    if (d.progress !== undefined) t.progress = d.progress
-    if (d.error !== undefined) t.error = d.error
-    if (d.quality) t.quality = d.quality
-    if (d.downgradeOffer !== undefined) {
-      t.meta = { ...(t.meta || {}), downgradeOffer: d.downgradeOffer }
-    }
-    if (d.existFileOffer !== undefined) {
-      t.meta = { ...(t.meta || {}), existFileOffer: d.existFileOffer }
-    }
-    if (d.filePath) t.file_path = d.filePath
-  }
-}))
-unsubs.push(onWS('download:removed', (d) => {
-  tasks.value = tasks.value.filter(x => x.id !== d.id)
-}))
-unsubs.push(onWS('download:cleared', (d) => {
-  if (d?.all) {
-    tasks.value = []
-    selectedIds.value = new Set()
-    return
-  }
-  tasks.value = tasks.value.filter(x => x.status !== 'completed')
-}))
-onUnmounted(() => {
-  if (progressFlushTimer) {
-    clearTimeout(progressFlushTimer)
-    progressFlushTimer = null
-  }
-  progressPending.clear()
-  unsubs.forEach(fn => fn())
-})
 
 const playableTasks = computed(() => tasks.value.filter(canPreview))
 
@@ -684,7 +717,14 @@ async function dismissSelected() {
 async function removeSelected() {
   const ids = selectedTasks.value.filter(t => t.file_path).map(t => t.id)
   if (!ids.length) return
-  if (!confirm(`确定删除 ${ids.length} 个任务的磁盘文件吗？此操作不可恢复。`)) return
+  const ok = await appConfirm({
+    title: '删除磁盘文件',
+    message: `确定删除 ${ids.length} 个任务的磁盘文件吗？`,
+    hint: '此操作不可恢复。',
+    confirmText: '删除文件',
+    danger: true,
+  })
+  if (!ok) return
   try {
     for (const id of ids) {
       await api.download.remove(id)
@@ -732,7 +772,7 @@ async function rejectDowngrade(task) {
 async function skipExist(task) {
   try {
     await api.download.skipExist(task.id)
-    showToast('已跳过，使用本地文件', 'success')
+    showToast('已跳过：保留本地文件，并从下载列表移除', 'success')
   } catch (e) {
     showToast(e.message || '跳过失败', 'error')
   }
@@ -765,7 +805,13 @@ async function dismiss(id) {
 
 async function dismissAll() {
   if (!tasks.value.length) return
-  if (!confirm(`确定将 ${tasks.value.length} 个任务移出列表吗？已下载的文件不会删除。`)) return
+  const ok = await appConfirm({
+    title: '清理全部列表',
+    message: `确定将 ${tasks.value.length} 个任务移出列表吗？`,
+    hint: '已下载的文件不会删除。',
+    confirmText: '移出列表',
+  })
+  if (!ok) return
   try {
     const res = await api.download.dismissAll()
     tasks.value = []
@@ -777,7 +823,14 @@ async function dismissAll() {
 }
 
 async function remove(id) {
-  if (!confirm('确定删除该任务的磁盘文件吗？此操作不可恢复。')) return
+  const ok = await appConfirm({
+    title: '删除磁盘文件',
+    message: '确定删除该任务的磁盘文件吗？',
+    hint: '此操作不可恢复。',
+    confirmText: '删除文件',
+    danger: true,
+  })
+  if (!ok) return
   try {
     await api.download.remove(id)
     tasks.value = tasks.value.filter(t => t.id !== id)

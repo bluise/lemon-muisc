@@ -205,7 +205,7 @@
               @click="onSongCoverClick(song)"
             >
               <div class="song-cover-media">
-                <CoverArt :src="song.picUrl" />
+                <CoverArt :src="song.picUrl || song.img" />
               </div>
               <span class="song-cover-ripple" aria-hidden="true" />
               <span
@@ -339,6 +339,7 @@ import { formatTrackTags, formatAlbumTags } from '../utils/format.js'
 import { getTrackFilePath } from '../utils/trackPath.js'
 import { countAutoFillColumns } from '../utils/grid.js'
 import { playItem, addToQueue, isInQueue, isPlayingItem, isPaused } from '../stores/player.js'
+import { appConfirm } from '../stores/appDialog.js'
 import {
   libraryTracks, libraryLoading, libraryMetaLoading, libraryLoadProgress,
   libraryScanning, libraryScanPhase, libraryScanCurrent, libraryScanTotal, libraryScanPercent,
@@ -762,7 +763,13 @@ async function deleteDupFile(group, file) {
     return
   }
   const name = file.fileName || filePath
-  const ok = window.confirm(`确定从磁盘永久删除？\n\n${name}\n\n此操作不可恢复。`)
+  const ok = await appConfirm({
+    title: '永久删除文件',
+    message: `确定从磁盘永久删除？\n\n${name}`,
+    hint: '此操作不可恢复。',
+    confirmText: '删除',
+    danger: true,
+  })
   if (!ok) return
 
   dupDeletingPath.value = filePath

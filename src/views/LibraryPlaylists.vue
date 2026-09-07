@@ -86,13 +86,16 @@
                 {{ batchDownloading ? '添加中…' : `批量下载${batchDownloadCount ? ` (${batchDownloadCount})` : ''}` }}
               </button>
               <div class="quality-menu" v-if="showBatchQualityMenu" :style="batchMenuStyle" @click.stop>
-                <div class="quality-menu-title">批量音质：不支持时将自动降为最接近可用音质</div>
-                <button
-                  v-for="q in batchQualities"
-                  :key="q"
-                  class="quality-option"
-                  @click="downloadBatch(q)"
-                >{{ getQualityLabel(q) }}</button>
+                <div class="quality-menu-title">批量音质：仅列出所选歌曲实际支持的音质</div>
+                <template v-if="batchQualities.length">
+                  <button
+                    v-for="q in batchQualities"
+                    :key="q"
+                    class="quality-option"
+                    @click="downloadBatch(q)"
+                  >{{ getQualityLabel(q) }}</button>
+                </template>
+                <div v-else class="quality-empty">所选歌曲暂无可用音质信息</div>
               </div>
             </div>
             <button v-if="canEditSelected" class="btn-ghost btn-sm" @click="openEdit">编辑歌单</button>
@@ -149,7 +152,7 @@
               @click="onTrackCoverClick(song)"
             >
               <div class="song-cover-media">
-                <CoverArt :src="song.picUrl" />
+                <CoverArt :src="song.picUrl || song.img" />
               </div>
               <span class="song-cover-ripple" aria-hidden="true" />
               <span

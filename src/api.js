@@ -157,6 +157,8 @@ export const api = {
       request(`/search?keyword=${encodeURIComponent(keyword)}&source=${source}&page=${page}`, options),
     searchAlbums: (keyword, source, page = 1, options = {}) =>
       request(`/search/album?keyword=${encodeURIComponent(keyword)}&source=${source}&page=${page}`, options),
+    searchPlaylists: (keyword, source, page = 1, options = {}) =>
+      request(`/search/playlist?keyword=${encodeURIComponent(keyword)}&source=${source}&page=${page}`, options),
     fetchAlbum: (source, id, options = {}) =>
       request(`/search/album/detail?source=${source}&id=${encodeURIComponent(id)}`, options),
     sources: () => request('/search/sources'),

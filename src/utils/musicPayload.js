@@ -1,5 +1,5 @@
 import { getTrackFilePath } from './trackPath.js'
-import { QUALITY_ORDER, DEFAULT_QUALITIES, sortQualities } from './quality.js'
+import { QUALITY_ORDER, sortQualities } from './quality.js'
 
 function pickField(...values) {
   for (const value of values) {
@@ -8,20 +8,35 @@ function pickField(...values) {
   return ''
 }
 
-export function getItemQualities(item) {
-  const list = item?.qualitys || item?.types?.map(t => t.type) || item?.meta?.qualitys || []
-  return sortQualities(list)
+/** 无损目标音质：默认不自动降到 MP3 */
+export function isLosslessQuality(quality) {
+  const q = String(quality || '').toLowerCase()
+  return q.includes('flac')
+    || q.includes('hires')
+    || q.includes('master')
+    || q.includes('atmos')
 }
 
-/** 批量下载：取所选歌曲可用音质的并集 */
+/** 只返回曲目自身声明的音质，绝不填充默认 128/320/flac */
+export function getItemQualities(item) {
+  const fromTypes = Array.isArray(item?.types)
+    ? item.types.map((t) => (typeof t === 'string' ? t : t?.type)).filter(Boolean)
+    : []
+  const fromList = Array.isArray(item?.qualitys) ? item.qualitys.filter(Boolean) : []
+  const fromMeta = Array.isArray(item?.meta?.qualitys) ? item.meta.qualitys.filter(Boolean) : []
+  // types 优先（带体积）；否则 qualitys
+  const raw = fromTypes.length ? fromTypes : (fromList.length ? fromList : fromMeta)
+  return sortQualities([...new Set(raw.map(String))])
+}
+
+/** 批量下载：所选歌曲可用音质的并集；都没有则空数组 */
 export function getBatchQualities(items) {
-  if (!items?.length) return [...DEFAULT_QUALITIES]
+  if (!items?.length) return []
   const union = new Set()
   for (const item of items) {
     for (const q of getItemQualities(item)) union.add(q)
   }
-  if (union.size) return sortQualities([...union])
-  return [...DEFAULT_QUALITIES]
+  return sortQualities([...union])
 }
 
 function qualityRank(q) {
@@ -29,10 +44,10 @@ function qualityRank(q) {
   return idx === -1 ? 999 : idx
 }
 
-/** 列表是否声明了不低于 floor 的音质（未知列表视为可能可用） */
+/** 列表是否声明了不低于 floor 的音质（无声明则视为不满足） */
 export function itemMeetsQualityFloor(item, preferred, floor) {
   const available = getItemQualities(item)
-  if (!available.length) return true
+  if (!available.length) return false
   const floorRank = qualityRank(floor || preferred)
   return available.some((q) => qualityRank(q) <= floorRank)
 }
@@ -93,13 +108,15 @@ export function buildBatchDownloadTasks(entries, source, {
   return { tasks, skippedCount }
 }
 
-/** 为单曲解析实际音质：优先指定，否则顺延更低档，再否则取可用最高 */
+/** 为单曲解析实际音质：优先指定；不可用则失败由服务端处理，不再擅自换成更低档展示用假列表 */
 export function resolveItemQuality(item, preferred) {
   const available = getItemQualities(item)
-  if (!available.length) return preferred || '128k'
-  if (preferred && available.includes(preferred)) return preferred
-  if (preferred) {
-    const start = QUALITY_ORDER.indexOf(preferred)
+  const want = preferred || ''
+  if (!available.length) return want || '128k'
+  if (want && available.includes(want)) return want
+  // 仅当指定音质不在列表时，才就近降到列表内更低档（用于无 policy 的旧入口）
+  if (want) {
+    const start = QUALITY_ORDER.indexOf(want)
     if (start !== -1) {
       for (let i = start + 1; i < QUALITY_ORDER.length; i++) {
         if (available.includes(QUALITY_ORDER[i])) return QUALITY_ORDER[i]
@@ -116,8 +133,10 @@ export function trackSelectKey(item, index = 0) {
 /** 构建下载任务 payload */
 export function buildDownloadTask(item, source, quality, extra = {}) {
   const preferred = quality || '320k'
-  // 批量策略任务固定用目标音质入队，由服务端按策略再降档；单曲仍可按列表可用音质就近
-  const q = extra.qualityPolicy ? preferred : resolveItemQuality(item, preferred)
+  // 批量策略任务固定用目标音质入队；单曲选无损时默认「不降档」，避免 QQ 假 flac 后再糊成 mp3
+  const policy = extra.qualityPolicy
+    || (isLosslessQuality(preferred) ? 'none' : '')
+  const q = policy ? preferred : resolveItemQuality(item, preferred)
   const albumMid = pickField(item.albumMid, item.albummid, item.albumId)
   return {
     name: item.name,
@@ -144,10 +163,10 @@ export function buildDownloadTask(item, source, quality, extra = {}) {
     picUrl: item.picUrl || item.img || item.meta?.picUrl || '',
     types: item.types || [],
     qualitys: item.qualitys || item.types?.map(t => t.type) || item.meta?.qualitys || [],
-    qualityPolicy: extra.qualityPolicy || '',
+    qualityPolicy: policy,
     qualityFloor: extra.qualityFloor || '',
     preferredQuality: extra.preferredQuality || preferred,
-    autoCascade: Boolean(extra.autoCascade),
+    autoCascade: extra.autoCascade != null ? Boolean(extra.autoCascade) : policy === 'cascade',
     deferExistAsk: Boolean(extra.deferExistAsk),
     batchId: extra.batchId || '',
   }

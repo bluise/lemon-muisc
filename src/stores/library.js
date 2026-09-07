@@ -544,6 +544,7 @@ export function trackToSnapshot(track, sourceOverride) {
   const key = getLibraryTrackKey(track)
   if (!key) return null
   const source = sourceOverride || track.source || (track.localPath ? 'local' : '')
+  const picUrl = track.picUrl || track.img || track.cover || ''
   return {
     key,
     name: track.name || '',
@@ -551,13 +552,16 @@ export function trackToSnapshot(track, sourceOverride) {
     album: track.album || track.albumName || '',
     localPath: track.localPath || track.filePath || '',
     source,
-    picUrl: track.picUrl || track.img || '',
-    hasPicture: Boolean(track.hasPicture || track.picUrl || track.img),
+    picUrl,
+    img: picUrl,
+    hasPicture: Boolean(track.hasPicture || picUrl),
     songId: track.songId ?? track.id,
     songmid: track.songmid,
     hash: track.hash,
     copyrightId: track.copyrightId,
     albumAudioId: track.albumAudioId,
+    albumId: track.albumId || track.AlbumID || '',
+    albumMid: track.albumMid || track.albummid || '',
     duration: track.duration || track.interval || '',
     year: track.year || '',
     genre: track.genre || '',
@@ -573,6 +577,7 @@ export function trackToSnapshot(track, sourceOverride) {
 export function snapshotToPlayTrack(snapshot, sourceOverride) {
   const source = sourceOverride || snapshot.source || (snapshot.localPath || snapshot.filePath ? 'local' : '')
   const localPath = snapshot.localPath || snapshot.filePath || ''
+  const picUrl = snapshot.picUrl || snapshot.img || ''
   return {
     id: snapshot.songId || snapshot.songmid || snapshot.hash || snapshot.copyrightId || snapshot.key,
     key: snapshot.key || (localPath ? `local:${localPath}` : ''),
@@ -581,13 +586,16 @@ export function snapshotToPlayTrack(snapshot, sourceOverride) {
     hash: snapshot.hash,
     copyrightId: snapshot.copyrightId,
     albumAudioId: snapshot.albumAudioId,
+    albumId: snapshot.albumId,
+    albumMid: snapshot.albumMid || snapshot.albummid,
     name: snapshot.name,
     singer: snapshot.singer,
     album: snapshot.album,
     localPath,
     filePath: localPath,
     source,
-    picUrl: snapshot.picUrl,
+    picUrl,
+    img: picUrl,
     lyric: snapshot.lyric,
     interval: snapshot.interval,
     types: snapshot.types,
@@ -623,8 +631,20 @@ export function recordRecentPlay(track) {
 
 export function getPlaylistCover(playlist, tracks = []) {
   if (playlist?.coverMode === 'custom' && playlist.coverUrl) return playlist.coverUrl
-  const first = tracks.find(t => t?.picUrl)
-  return first?.picUrl || ''
+  const first = tracks.find(t => t?.picUrl || t?.img)
+  return first?.picUrl || first?.img || playlist?.coverUrl || ''
+}
+
+function trackHasDisplayCover(track) {
+  return Boolean(track?.picUrl || track?.img)
+}
+
+function withCoverFallback(track, fallbackCover = '') {
+  if (!track) return track
+  const pic = track.picUrl || track.img || fallbackCover || ''
+  if (!pic) return track
+  if (track.picUrl === pic && (track.img === pic || !track.img)) return track
+  return { ...track, picUrl: pic, img: pic }
 }
 
 export function bumpLibraryCoverVersion(filePath) {
@@ -650,19 +670,29 @@ export function resolvePlaylistTracks(playlist, allTracks) {
   if (!playlist) return []
   const map = new Map(allTracks.map(t => [getLibraryTrackKey(t), t]))
   const snapshots = playlist.trackSnapshots || {}
+  const playlistCover = playlist.coverUrl || ''
   return (playlist.trackKeys || []).map((k) => {
     if (map.has(k)) {
-      const track = enrichLocalCover(map.get(k))
+      let track = enrichLocalCover(map.get(k))
+      const snap = snapshots[k]
+      const onlinePic = snap?.picUrl || snap?.img || ''
+      if (!trackHasDisplayCover(track) && onlinePic) {
+        track = { ...track, picUrl: onlinePic, img: onlinePic }
+      } else if (!trackHasDisplayCover(track) && playlistCover) {
+        track = { ...track, picUrl: playlistCover, img: playlistCover }
+      }
       return { ...track, isLocal: true }
     }
     const snap = snapshots[k]
     if (!snap) return null
-    const track = enrichLocalCover({
+    const track = enrichLocalCover(withCoverFallback({
       ...snap,
       key: k,
       singer: snap.singer || '未知艺术家',
       album: snap.album || '未知专辑',
-    })
+      picUrl: snap.picUrl || snap.img || '',
+      img: snap.img || snap.picUrl || '',
+    }, playlistCover))
     return { ...track, isLocal: isLocalPlaylistTrack(track) }
   }).filter(Boolean)
 }
@@ -814,6 +844,7 @@ export function createPlaylist(name, {
   importSource = '',
   importUrl = '',
   lastSyncedAt = 0,
+  lastRemoteSyncedAt = 0,
 } = {}) {
   const title = String(name || '').trim()
   if (!title) return null
@@ -829,6 +860,7 @@ export function createPlaylist(name, {
     importSource,
     importUrl,
     lastSyncedAt,
+    lastRemoteSyncedAt: lastRemoteSyncedAt || lastSyncedAt || 0,
   })
   const list = [item, ...customPlaylists.value]
   customPlaylists.value = list
@@ -966,7 +998,24 @@ export function syncPlaylistLocalTracks(playlistId) {
     const local = findLocalMatchForTrack(onlineTrack, library)
     if (local) {
       const localKey = getLibraryTrackKey(local)
+      const onlinePic = snap.picUrl || snap.img || ''
+      const localCovered = enrichLocalCover(local)
       delete snapshots[k]
+      // 本地无内嵌封面时保留线上封面，供歌单列表展示
+      if (onlinePic && !trackHasDisplayCover(localCovered)) {
+        snapshots[localKey] = {
+          ...(snapshots[localKey] || {}),
+          key: localKey,
+          name: local.name || snap.name || '',
+          singer: local.singer || snap.singer || '',
+          album: local.album || snap.album || '',
+          localPath: local.localPath || local.filePath || '',
+          source: 'local',
+          picUrl: onlinePic,
+          img: onlinePic,
+          hasPicture: true,
+        }
+      }
       if (!seen.has(localKey)) {
         newKeys.push(localKey)
         seen.add(localKey)
@@ -1021,17 +1070,47 @@ export async function refreshImportedPlaylistFromNetwork(api, playlistId, { onPr
 
   const { list, info } = await fetchPlatformPlaylistTracks(api, pl.importUrl, pl.importSource, onProgress)
   const existingKeys = new Set(pl.trackKeys || [])
+  const snapshots = { ...(pl.trackSnapshots || {}) }
+  const playlistCover = info?.img || info?.picUrl || pl.coverUrl || ''
   const newTracks = []
+  let coversUpdated = 0
   for (const track of list) {
     const snap = trackToSnapshot(track, pl.importSource)
-    if (!snap || existingKeys.has(snap.key)) continue
-    newTracks.push(track)
+    if (!snap) continue
+    const pic = snap.picUrl || snap.img || playlistCover || ''
+    if (pic) {
+      snap.picUrl = pic
+      snap.img = pic
+      snap.hasPicture = true
+    }
+    if (existingKeys.has(snap.key)) {
+      const prev = snapshots[snap.key]
+      if (prev && pic && !(prev.picUrl || prev.img)) {
+        snapshots[snap.key] = {
+          ...prev,
+          picUrl: pic,
+          img: pic,
+          hasPicture: true,
+          albumId: snap.albumId || prev.albumId,
+          albumMid: snap.albumMid || prev.albumMid,
+        }
+        coversUpdated += 1
+      }
+      continue
+    }
+    newTracks.push({ ...track, picUrl: pic || track.picUrl, img: pic || track.img })
     existingKeys.add(snap.key)
   }
 
-  const patch = { lastRemoteSyncedAt: Date.now() }
-  const coverUrl = info?.img || info?.picUrl || ''
+  const patch = {
+    lastRemoteSyncedAt: Date.now(),
+    ...(coversUpdated ? { trackSnapshots: snapshots } : {}),
+  }
+  const coverUrl = playlistCover
   if (coverUrl && pl.coverMode !== 'custom') {
+    patch.coverUrl = coverUrl
+    patch.coverMode = 'custom'
+  } else if (coverUrl && !pl.coverUrl) {
     patch.coverUrl = coverUrl
     patch.coverMode = 'custom'
   }
@@ -1098,14 +1177,44 @@ export async function importPlaylistFromUrl(api, { url, source, name = '', onPro
   const { list, info } = await fetchPlatformPlaylistTracks(api, input, source, onProgress)
   if (!list.length) throw new Error('歌单为空或解析失败')
 
+  return importPlaylistFromLoaded({
+    name: name || info?.name || '',
+    source,
+    url: input,
+    tracks: list,
+    info,
+    onProgress,
+  })
+}
+
+/** 将已加载的平台歌单曲目导入为音乐库「网络歌单」 */
+export function importPlaylistFromLoaded({
+  name = '',
+  source = '',
+  url = '',
+  tracks = [],
+  info = null,
+  onProgress,
+} = {}) {
+  const rawList = Array.isArray(tracks) ? tracks.filter(Boolean) : []
+  if (!rawList.length) throw new Error('歌单为空或尚未加载完成')
+  if (!source) throw new Error('缺少音乐平台')
+
+  const input = String(url || '').trim()
   const playlistName = String(name || info?.name || '导入的歌单').trim()
-  const coverUrl = info?.img || info?.picUrl || ''
+  const coverUrl = info?.img || info?.picUrl
+    || rawList.find((t) => t.picUrl || t.img)?.picUrl
+    || rawList.find((t) => t.img)?.img
+    || ''
+  const list = rawList.map((track) => withCoverFallback(track, coverUrl))
+
+  onProgress?.(`正在创建歌单「${playlistName}」…`)
   const pl = createPlaylist(playlistName, {
     coverUrl,
     coverMode: coverUrl ? 'custom' : 'auto',
     playlistType: 'imported',
     importSource: source,
-    importUrl: input,
+    importUrl: input || String(list[0]?.playlistId || ''),
     lastSyncedAt: Date.now(),
     lastRemoteSyncedAt: Date.now(),
   })
@@ -1810,6 +1919,8 @@ export function initLibraryHotReload(api, { onWS } = {}) {
     reloadLibraryUserData()
   })
   offDownloadComplete = onWS('download:status', (payload) => {
+    // 同名跳过：未写入新文件，不触发「新增歌曲」提示
+    if (payload?.skippedExist) return
     if (payload?.status === 'completed' && payload?.filePath) {
       queueLibraryHotReload([payload.filePath])
     }

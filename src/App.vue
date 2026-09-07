@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="app">
     <div v-if="showAuthSplash" class="auth-splash" aria-busy="true">
       <img src="/icon.png" alt="" class="auth-splash-logo" />
@@ -363,6 +363,22 @@
       </router-link>
     </nav>
     </template>
+
+    <ConfirmModal
+      :open="appDialogState.open"
+      :mode="appDialogState.mode"
+      :title="appDialogState.title"
+      :message="appDialogState.message"
+      :hint="appDialogState.hint"
+      :cover="appDialogState.cover"
+      :confirm-text="appDialogState.confirmText"
+      :cancel-text="appDialogState.cancelText"
+      :danger="appDialogState.danger"
+      :busy="appDialogState.busy"
+      :busy-text="appDialogState.busyText"
+      @confirm="confirmAppDialog"
+      @cancel="cancelAppDialog"
+    />
   </div>
 </template>
 
@@ -401,6 +417,13 @@ import PlayerBar from './components/PlayerBar.vue'
 import TagEditModal from './components/TagEditModal.vue'
 import FullscreenPlayer from './components/FullscreenPlayer.vue'
 import PageSkeleton from './components/PageSkeleton.vue'
+import ConfirmModal from './components/ConfirmModal.vue'
+import {
+  appDialogState,
+  appAlert,
+  confirmAppDialog,
+  cancelAppDialog,
+} from './stores/appDialog.js'
 import {
   noActiveSourcePrompt,
   clearNoActiveSourcePrompt,
@@ -525,7 +548,7 @@ async function confirmDownloadSource(sourceApiId) {
     downloadSourcePrompt.value = null
     showNextDownloadSourcePrompt()
   } catch (e) {
-    alert(e.message || '切换音源失败')
+    await appAlert({ title: '操作失败', message: e.message || '切换音源失败' })
   } finally {
     downloadSourceBusy.value = ''
   }
@@ -618,7 +641,7 @@ async function skipAllExistFromSummary() {
       await api.download.skipExist(pending[0].id, true)
       existSummaryPrompt.value = null
     } catch (e) {
-      alert(e.message || '全部跳过失败')
+      await appAlert({ title: '操作失败', message: e.message || '全部跳过失败' })
     } finally {
       existSummaryBusy.value = false
     }
@@ -630,7 +653,7 @@ async function skipAllExistFromSummary() {
     existSummaryPrompt.value = null
     existFileQueue.length = 0
   } catch (e) {
-    alert(e.message || '全部跳过失败')
+    await appAlert({ title: '操作失败', message: e.message || '全部跳过失败' })
   } finally {
     existSummaryBusy.value = false
   }
@@ -653,7 +676,7 @@ async function overwriteAllExistFromSummary() {
     existSummaryPrompt.value = null
     existFileQueue.length = 0
   } catch (e) {
-    alert(e.message || '全部重新下载失败')
+    await appAlert({ title: '操作失败', message: e.message || '全部重新下载失败' })
   } finally {
     existSummaryBusy.value = false
   }
@@ -676,7 +699,7 @@ async function startExistHandlingFromSummary() {
       })
     }
   } catch (e) {
-    alert(e.message || '加载待处理列表失败')
+    await appAlert({ title: '操作失败', message: e.message || '加载待处理列表失败' })
   } finally {
     existSummaryBusy.value = false
   }
@@ -703,7 +726,7 @@ async function skipExistFilePrompt() {
     existFilePrompt.value = null
     showNextExistFilePrompt()
   } catch (e) {
-    alert(e.message || '跳过失败')
+    await appAlert({ title: '操作失败', message: e.message || '跳过失败' })
   } finally {
     existFileBusy.value = false
   }
@@ -719,7 +742,7 @@ async function confirmExistFilePrompt() {
     existFilePrompt.value = null
     showNextExistFilePrompt()
   } catch (e) {
-    alert(e.message || '确认下载失败')
+    await appAlert({ title: '操作失败', message: e.message || '确认下载失败' })
   } finally {
     existFileBusy.value = false
   }
@@ -808,7 +831,7 @@ async function acceptDowngradePrompt() {
     downgradeQueue.length = 0
     downgradePrompt.value = null
   } catch (e) {
-    alert(e.message || '确认降质失败')
+    await appAlert({ title: '操作失败', message: e.message || '确认降质失败' })
   } finally {
     downgradeBusy.value = false
   }
@@ -824,7 +847,7 @@ async function retrySameQualityPrompt() {
     downgradePrompt.value = null
     showNextDowngradePrompt()
   } catch (e) {
-    alert(e.message || '重试失败')
+    await appAlert({ title: '操作失败', message: e.message || '重试失败' })
   } finally {
     downgradeBusy.value = false
   }

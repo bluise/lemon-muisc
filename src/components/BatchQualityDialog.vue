@@ -37,11 +37,17 @@
         <label class="batch-strategy" :class="{ active: strategy === 'none' }">
           <input v-model="strategy" type="radio" value="none" />
           <div class="batch-strategy-body">
-            <div class="batch-strategy-title">不降档</div>
-            <div class="batch-strategy-desc">拿不到目标音质则直接失败，并在下载列表写明原因；仍可手动重试。</div>
+            <div class="batch-strategy-title">不降档（只要目标音质）</div>
+            <div class="batch-strategy-desc">
+              拿不到目标音质则直接失败。选 FLAC 等无损时推荐此项；服务端会校验真实 FLAC，拒绝「假 flac / 实为 MP3」的文件。
+            </div>
           </div>
         </label>
       </div>
+
+      <p v-if="isLosslessPreferred" class="batch-quality-hint lossless-hint">
+        当前目标为无损音质：已默认「不降档」。若接受自动降到 320K/128K，请改选上方其它策略。
+      </p>
 
       <div class="batch-quality-actions">
         <button type="button" class="btn-ghost" :disabled="busy" @click="$emit('cancel')">取消</button>
@@ -56,6 +62,7 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
 import { getQualityLabel, QUALITY_ORDER } from '../utils/quality.js'
+import { isLosslessQuality } from '../utils/musicPayload.js'
 
 const props = defineProps({
   plan: { type: Object, default: null },
@@ -71,6 +78,7 @@ const floorQuality = ref('320k')
 const totalCount = computed(() => props.plan?.entries?.length || 0)
 const unsupportedCount = computed(() => props.plan?.unsupportedCount || 0)
 const preferred = computed(() => props.plan?.preferred || '320k')
+const isLosslessPreferred = computed(() => isLosslessQuality(preferred.value))
 
 const floorOptions = computed(() => {
   const start = QUALITY_ORDER.indexOf(preferred.value)
@@ -79,7 +87,7 @@ const floorOptions = computed(() => {
 })
 
 watch(() => props.plan, () => {
-  strategy.value = 'cascade'
+  strategy.value = isLosslessQuality(props.plan?.preferred) ? 'none' : 'cascade'
   const opts = floorOptions.value
   floorQuality.value = opts.includes('320k') ? '320k' : (opts[0] || preferred.value)
 })
@@ -150,6 +158,12 @@ function onConfirm() {
   font-size: 12px;
   line-height: 1.5;
   color: var(--text-muted);
+}
+
+.lossless-hint {
+  margin-top: -6px;
+  margin-bottom: 14px;
+  color: var(--accent);
 }
 
 .batch-strategy-list {

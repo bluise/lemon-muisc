@@ -25,6 +25,11 @@ import {
   probeRemoteAudioDurationSeconds,
   assertNotPreviewClip,
 } from '../utils/audioDuration.js'
+import {
+  assertLosslessContentType,
+  assertLosslessFile,
+  isLosslessQuality,
+} from '../utils/audioFormat.js'
 import { formatUserError } from '../utils/userError.js'
 import { buildSourceFallbackOffer } from '../utils/sourceFallback.js'
 import { extractMusicUrl } from '../utils/sourceResult.js'
@@ -182,6 +187,22 @@ downloadRouter.post('/add', async (req, res) => {
       }
     })
     tx()
+
+    if (added.length) {
+      const placeholders = added.map(() => '?').join(',')
+      const rows = getDB().prepare(
+        `SELECT * FROM download_tasks WHERE id IN (${placeholders}) ORDER BY created_at DESC`,
+      ).all(...added)
+      broadcast('download:added', {
+        tasks: rows.map((r) => ({
+          ...r,
+          meta: (() => {
+            try { return JSON.parse(r.meta || '{}') } catch { return {} }
+          })(),
+        })),
+        skipped,
+      }, req.user.id)
+    }
 
     processQueue()
     res.json({ ok: true, ids: added, skipped })
@@ -565,21 +586,14 @@ function completeTaskWithExistingFile(row) {
     })
     return
   }
-  cleanupTaskDownloadArtifacts(row, meta, settings, { exceptPath: filePath })
-  getDB().prepare(`
-    UPDATE download_tasks SET status = 'completed', file_path = ?, progress = 1, error = NULL, meta = ? WHERE id = ?
-  `).run(filePath, JSON.stringify(meta), row.id)
-  dlBroadcast('download:status', {
-    id: row.id,
-    status: 'completed',
-    progress: 1,
-    filePath,
-    quality: row.quality,
-    existFileOffer: null,
-    skippedExist: true,
-  })
-  scanBatchAndCache([{ filePath }]).catch(() => {})
-  notifyLibraryChanged([filePath], { reason: 'download-skip-exist' })
+  // 跳过：不占用「已完成」位、不顶到列表前；直接移出下载队列，本地文件不动
+  cleanupTaskDownloadArtifacts(row, meta, settings, { exceptPath: filePath, onlyTracked: true })
+  try {
+    removeDownloadTask(row.id, { deleteFile: false })
+  } catch {
+    getDB().prepare('DELETE FROM download_tasks WHERE id = ?').run(row.id)
+    dlBroadcast('download:removed', { id: row.id })
+  }
 }
 
 function confirmPendingExistForUser(userId, { exceptId, action } = {}) {
@@ -743,7 +757,7 @@ async function resolveDownloadUrl(source, quality, musicInfo, settings, meta = {
   return { url, sourceInfo: result }
 }
 
-async function streamToFile(url, partPath, taskId, abort) {
+async function streamToFile(url, partPath, taskId, abort, quality = '') {
   const { default: needlePkg } = await import('needle')
   const stream = needlePkg.get(url, {
     follow_max: 5,
@@ -759,6 +773,12 @@ async function streamToFile(url, partPath, taskId, abort) {
   stream.on('header', (code, headers) => {
     if (code && code >= 400) {
       stream.emit('err', new Error(`下载响应异常 HTTP ${code}`))
+      return
+    }
+    try {
+      assertLosslessContentType(headers?.['content-type'], quality)
+    } catch (e) {
+      stream.emit('err', e)
       return
     }
     total = parseInt(headers['content-length']) || 0
@@ -1361,7 +1381,7 @@ async function downloadTask(task, settings) {
         }
 
         // 先在应用配置目录内写完（含标签），再一次性发布到下载目录，降低夸克等网盘挂载产生 name(1) 的概率
-        await streamToFile(url, partPath, task.id, abort)
+        await streamToFile(url, partPath, task.id, abort, quality)
         finalizePartFile(partPath, stagedPath)
 
         // 落盘后必检实际文件时长（远程 Range 探测可能偏短/失败，不能只依赖它）
@@ -1380,6 +1400,21 @@ async function downloadTask(task, settings) {
             }
             throw postErr
           }
+        }
+
+        // 无损档必须校验真实 FLAC，拒绝 QQ 等返回的「假 flac」（实为 MP3）
+        try {
+          assertLosslessFile(stagedPath, quality)
+        } catch (formatErr) {
+          cleanupDownloadPath(stagedPath)
+          cleanupStagingDir(task.id)
+          if (formatErr?.code === 'FAKE_LOSSLESS' && meta.sourceApiId) {
+            recordSourceHealthOutcome(meta.sourceApiId, true, source)
+            const skipped = new Set([...(meta.skipSourceIds || []), meta.sourceApiId].filter(Boolean))
+            meta.skipSourceIds = [...skipped]
+            saveTaskMeta(task.id, meta)
+          }
+          throw formatErr
         }
 
         await writeMetaIfNeeded(task, meta, stagedPath, ext, settings)
@@ -1439,7 +1474,10 @@ async function downloadTask(task, settings) {
     ]
 
     if (policy === 'none') {
-      markError(task.id, formatMissingQualityError(preferred, '', reason), meta)
+      const msg = lastError?.code === 'FAKE_LOSSLESS'
+        ? (lastError.message || formatMissingQualityError(preferred, '', reason))
+        : formatMissingQualityError(preferred, '', reason)
+      markError(task.id, msg, meta)
       return
     }
 
@@ -1582,6 +1620,7 @@ async function saveLrcFile(filePath, lrcResult, settings) {
 }
 
 function guessExt(url, quality) {
+  if (isLosslessQuality(quality)) return '.flac'
   if (url.includes('.flac') || quality?.includes('flac')) return '.flac'
   if (url.includes('.wav')) return '.wav'
   if (url.includes('.ape')) return '.ape'

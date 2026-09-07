@@ -4,15 +4,21 @@ export const searchState = reactive({
   keyword: '',
   activeSource: '',
   sources: {},
-  searchMode: 'song', // song | album
-  viewMode: 'list', // list | album-detail
+  searchMode: 'song', // song | album | playlist
+  viewMode: 'list', // list | album-detail | playlist-detail
   results: [],
   albumResults: [],
   albumInfo: null,
+  playlistResults: [],
+  playlistInfo: null,
+  playlistImportId: '',
+  playlistTotal: 0,
   page: 1,
   totalPages: 0,
   loading: false,
   albumLoading: false,
+  playlistLoading: false,
+  playlistLoadingMore: false,
   searched: false,
 })
 

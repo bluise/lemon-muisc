@@ -612,6 +612,7 @@ import { api } from '../api.js'
 import {
   updateLibraryTracksFromFiles,
 } from '../stores/library.js'
+import { appConfirm } from '../stores/appDialog.js'
 import {
   loadingPlay, isPaused, isPlayingItem, playItem, addToQueue, isInQueue,
   refreshPlayingLocalMeta,
@@ -1202,7 +1203,7 @@ function autoMatchMissing() {
 }
 
 /** 按文件名重新搜索，覆盖重写勾选文件的标签/封面/歌词并落盘 */
-function autoRematchSelectedByFilename() {
+async function autoRematchSelectedByFilename() {
   const targets = selectedFiles.value
   if (!targets.length) {
     showToast('请先勾选要重设的文件', 'info')
@@ -1213,11 +1214,12 @@ function autoRematchSelectedByFilename() {
     return
   }
   const srcLabel = sourceOptions.find(o => o.value === fetchSource.value)?.label || fetchSource.value
-  const ok = window.confirm(
-    `将按文件名重新搜索（音源：${srcLabel}），并为已勾选的 ${targets.length} 个文件重写：\n`
-    + `标题、歌手、专辑、封面、歌词等，并直接保存到磁盘。\n\n`
-    + `现有标签会被覆盖。确定继续？`,
-  )
+  const ok = await appConfirm({
+    title: '按文件名重设',
+    message: `将按文件名重新搜索（音源：${srcLabel}），并为已勾选的 ${targets.length} 个文件重写：\n标题、歌手、专辑、封面、歌词等，并直接保存到磁盘。`,
+    hint: '现有标签会被覆盖。确定继续？',
+    confirmText: '开始重设',
+  })
   if (!ok) return
   runTagMatch(targets)
 }
@@ -1646,19 +1648,19 @@ function syncFormToEditingFile() {
   }
 }
 
-function applyToFiles({ silent = false } = {}) {
+async function applyToFiles({ silent = false } = {}) {
   if (!editForm.value) return
 
   // 多选时：必须明确「应用到选中」，并二次确认，防止误把同一首歌信息刷到全部文件
   if (isBatchMode.value) {
     const n = selectedFiles.value.length
     const title = String(editForm.value.title || '').trim() || '(空标题)'
-    const ok = window.confirm(
-      `确定把当前编辑内容应用到选中的 ${n} 个文件？\n\n`
-      + `将统一写入标题「${title}」等字段。\n`
-      + `若这些文件不是同一首歌，请点「取消」。\n\n`
-      + `此步只更新列表，还需再点顶部「保存全部修改」才会写进磁盘。`,
-    )
+    const ok = await appConfirm({
+      title: '应用到选中文件',
+      message: `确定把当前编辑内容应用到选中的 ${n} 个文件？\n\n将统一写入标题「${title}」等字段。\n若这些文件不是同一首歌，请点「取消」。`,
+      hint: '此步只更新列表，还需再点顶部「保存全部修改」才会写进磁盘。',
+      confirmText: '应用到选中',
+    })
     if (!ok) return
 
     const meta = buildMetaFromForm()
@@ -1739,10 +1741,13 @@ async function saveAll() {
   if (modified.length > 1) {
     const sameTitle = modified.every(f => f.title === modified[0].title && f.artist === modified[0].artist)
     if (sameTitle) {
-      const ok = window.confirm(
-        `即将把 ${modified.length} 个文件写入磁盘，且它们的标题/歌手相同（「${modified[0].title || ''}」/「${modified[0].artist || ''}」）。\n\n`
-        + `若这是误操作（例如全选后误点应用），请取消并逐个恢复。\n\n确定保存？`,
-      )
+      const ok = await appConfirm({
+        title: '确认批量保存',
+        message: `即将把 ${modified.length} 个文件写入磁盘，且它们的标题/歌手相同（「${modified[0].title || ''}」/「${modified[0].artist || ''}」）。\n\n若这是误操作（例如全选后误点应用），请取消并逐个恢复。`,
+        hint: '确定保存到磁盘？',
+        confirmText: '保存全部',
+        danger: true,
+      })
       if (!ok) return
     }
   }

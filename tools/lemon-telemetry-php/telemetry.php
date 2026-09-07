@@ -77,10 +77,10 @@ try {
     $pdo = lemon_telemetry_db();
     $now = gmdate('c');
 
-    // Idempotent upsert: keep the larger active_minutes (client sends day cumulative)
+    // Idempotent upsert: keep the larger active_minutes; track peak concurrent sessions for the day
     $stmt = $pdo->prepare(
-        'INSERT INTO daily_usage (day, install_id, app, version, active_minutes, online_sessions, updated_at)
-         VALUES (:day, :install_id, :app, :version, :active_minutes, :online_sessions, :updated_at)
+        'INSERT INTO daily_usage (day, install_id, app, version, active_minutes, online_sessions, peak_online_sessions, updated_at)
+         VALUES (:day, :install_id, :app, :version, :active_minutes, :online_sessions, :peak_online_sessions, :updated_at)
          ON CONFLICT(day, install_id) DO UPDATE SET
            app = excluded.app,
            version = excluded.version,
@@ -89,6 +89,10 @@ try {
              ELSE daily_usage.active_minutes
            END,
            online_sessions = excluded.online_sessions,
+           peak_online_sessions = CASE
+             WHEN excluded.peak_online_sessions > daily_usage.peak_online_sessions THEN excluded.peak_online_sessions
+             ELSE daily_usage.peak_online_sessions
+           END,
            updated_at = excluded.updated_at'
     );
     $stmt->execute([
@@ -98,6 +102,7 @@ try {
         ':version' => $version,
         ':active_minutes' => $activeMinutes,
         ':online_sessions' => $onlineSessions,
+        ':peak_online_sessions' => $onlineSessions,
         ':updated_at' => $now,
     ]);
 

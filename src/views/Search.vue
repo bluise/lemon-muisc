@@ -1,7 +1,7 @@
 <template>
   <div class="search-page">
     <div class="page-title">搜索</div>
-    <div class="page-subtitle">搜索歌曲或专辑，试听、下载；批量下载会一次确认降档策略，多音源时先同音质轮询再降档</div>
+    <div class="page-subtitle">搜索歌曲、专辑或歌单，试听、下载；批量下载会一次确认降档策略，多音源时先同音质轮询再降档</div>
 
     <div v-if="playlistPickTarget" class="pick-hint card">
       点击歌曲右侧「加入歌单」添加到「{{ playlistPickTarget.name }}」
@@ -14,7 +14,7 @@
           variant="bar"
           show-search-icon
           class="search-bar"
-          :placeholder="searchState.searchMode === 'album' ? '搜索专辑名、歌手...' : '搜索歌曲、歌手...'"
+          :placeholder="searchPlaceholder"
           enterkeyhint="search"
         />
         <button type="submit" class="btn-primary search-btn" :disabled="isSearching">
@@ -30,6 +30,10 @@
           :class="['mode-tab', { active: searchState.searchMode === 'album' }]"
           @click="switchSearchMode('album')"
         >专辑</button>
+        <button
+          :class="['mode-tab', { active: searchState.searchMode === 'playlist' }]"
+          @click="switchSearchMode('playlist')"
+        >歌单</button>
       </div>
       <div class="source-tabs">
         <button
@@ -44,6 +48,10 @@
       <button class="btn-ghost btn-sm" @click="backToAlbumList">← 返回专辑列表</button>
     </div>
 
+    <div v-if="searchState.viewMode === 'playlist-detail' && searchState.playlistInfo" class="album-detail-toolbar">
+      <button class="btn-ghost btn-sm" @click="backToPlaylistList">← 返回歌单列表</button>
+    </div>
+
     <div v-if="searchState.viewMode === 'album-detail' && searchState.albumInfo" class="album-info card">
       <div class="album-cover-wrap">
         <CoverArt :src="searchState.albumInfo.img" />
@@ -56,6 +64,39 @@
           <span>共 {{ searchState.results.length }} 首</span>
         </div>
         <p v-if="searchState.albumInfo.desc" class="album-desc">{{ cleanText(searchState.albumInfo.desc) }}</p>
+      </div>
+    </div>
+
+    <div v-if="searchState.viewMode === 'playlist-detail' && searchState.playlistInfo" class="album-info card">
+      <div class="album-cover-wrap">
+        <CoverArt :src="searchState.playlistInfo.img" />
+      </div>
+      <div class="album-meta">
+        <h2 class="album-name">{{ cleanText(searchState.playlistInfo.name) || '未命名歌单' }}</h2>
+        <div class="album-tags">
+          <span v-if="searchState.playlistInfo.author">创建者：{{ cleanText(searchState.playlistInfo.author) }}</span>
+          <span v-if="searchState.playlistInfo.play_count">播放 {{ searchState.playlistInfo.play_count }}</span>
+          <span>共 {{ searchState.playlistTotal || searchState.results.length }} 首</span>
+        </div>
+        <p v-if="searchState.playlistInfo.desc" class="album-desc">{{ cleanText(searchState.playlistInfo.desc) }}</p>
+      </div>
+    </div>
+
+    <div
+      v-if="searchState.viewMode === 'playlist-detail' && showPlaylistLoadBar"
+      class="playlist-load-bar card"
+      role="progressbar"
+      :aria-valuenow="playlistLoadProgress"
+      aria-valuemin="0"
+      aria-valuemax="100"
+      :aria-label="playlistLoadLabel"
+    >
+      <div class="playlist-load-meta">
+        <span class="playlist-load-text">{{ playlistLoadLabel }}</span>
+        <span v-if="!searchState.playlistLoading || searchState.results.length" class="playlist-load-percent">{{ playlistLoadProgress }}%</span>
+      </div>
+      <div class="playlist-load-track" :class="{ indeterminate: searchState.playlistLoading && !searchState.results.length }">
+        <div class="playlist-load-fill" :style="{ width: `${playlistLoadProgress}%` }" />
       </div>
     </div>
 
@@ -92,11 +133,45 @@
         <div v-else class="empty album-hint">输入专辑名或歌手后搜索</div>
     </div>
 
+    <div v-if="showPlaylistGrid" class="album-results card">
+      <div v-if="searchState.playlistLoading && !searchState.playlistResults.length" class="album-loading">正在搜索歌单...</div>
+      <template v-else-if="searchState.playlistResults.length">
+        <div class="album-grid">
+          <button
+            v-for="item in searchState.playlistResults"
+            :key="`${item.source}-${item.id}`"
+            class="album-card"
+            @click="openPlaylist(item)"
+          >
+            <div class="album-card-cover-wrap">
+              <CoverArt :src="item.img" />
+            </div>
+            <div class="album-card-meta">
+              <div class="album-card-name" :title="cleanText(item.name)">{{ cleanText(item.name) }}</div>
+              <div class="album-card-artist" :title="cleanText(item.author)">{{ cleanText(item.author) || '未知作者' }}</div>
+              <div class="album-card-stats">
+                <span v-if="item.total">{{ item.total }} 首</span>
+                <span v-if="item.play_count">播放 {{ item.play_count }}</span>
+              </div>
+            </div>
+          </button>
+        </div>
+        <div class="pagination" v-if="searchState.totalPages > 1">
+          <button class="btn-ghost btn-sm" :disabled="searchState.page <= 1" @click="searchState.page--; doSearch()">上一页</button>
+          <span class="page-info">{{ searchState.page }} / {{ searchState.totalPages }}</span>
+          <button class="btn-ghost btn-sm" :disabled="searchState.page >= searchState.totalPages" @click="searchState.page++; doSearch()">下一页</button>
+        </div>
+      </template>
+      <div v-else-if="searchState.searched" class="empty">暂无歌单结果</div>
+      <div v-else class="empty album-hint">输入歌单名或关键词后搜索</div>
+    </div>
+
     <div class="results card" v-if="showSongResults">
       <div class="results-toolbar">
         <span class="results-count">
-          共 {{ searchState.results.length }} 首
+          共 {{ searchState.viewMode === 'playlist-detail' ? (searchState.playlistTotal || searchState.results.length) : searchState.results.length }} 首
           <template v-if="showPagination"> · 第 {{ albumTrackPage }}/{{ albumTrackTotalPages }} 页</template>
+          <template v-if="searchState.viewMode === 'playlist-detail' && searchState.playlistLoadingMore"> · 加载剩余歌曲...</template>
           <template v-if="selectedCount"> · 已选 {{ selectedCount }}</template>
         </span>
         <label class="mobile-select-all">
@@ -113,15 +188,26 @@
               {{ batchDownloading ? '添加中...' : `批量下载${selectedCount ? ` (${selectedCount})` : ''}` }}
             </button>
             <div class="quality-menu" v-if="showBatchQualityMenu" :style="batchMenuStyle" @click.stop>
-              <div class="quality-menu-title">批量音质：不支持时将自动降为最接近可用音质</div>
-              <button
-                v-for="q in batchQualities"
-                :key="q"
-                class="quality-option"
-                @click="downloadSelected(q)"
-              >{{ getQualityLabel(q) }}</button>
+              <div class="quality-menu-title">批量音质：仅列出所选歌曲实际支持的音质</div>
+              <template v-if="batchQualities.length">
+                <button
+                  v-for="q in batchQualities"
+                  :key="q"
+                  class="quality-option"
+                  @click="downloadSelected(q)"
+                >{{ getQualityLabel(q) }}</button>
+              </template>
+              <div v-else class="quality-empty">所选歌曲暂无可用音质信息</div>
             </div>
           </div>
+          <button
+            v-if="searchState.viewMode === 'playlist-detail'"
+            class="btn-ghost btn-sm"
+            :disabled="!searchState.results.length || searchState.playlistLoading || searchState.playlistLoadingMore || importingPlaylist"
+            @click="importCurrentPlaylistToLibrary"
+          >
+            {{ importingPlaylist ? '导入中...' : '导入到音乐库' }}
+          </button>
           <button class="btn-ghost btn-sm" @click="addAllToQueue">全部加入列表</button>
           <button class="btn-primary btn-sm" @click="playAll">播放全部</button>
         </div>
@@ -188,6 +274,19 @@
 
     <div v-if="toast" class="toast" :class="toast.type">{{ toast.text }}</div>
 
+    <ConfirmModal
+      :open="Boolean(importConfirm)"
+      title="导入到音乐库歌单"
+      :message="importConfirm?.message || ''"
+      :hint="importConfirm?.hint || ''"
+      :cover="importConfirm?.cover || ''"
+      confirm-text="导入"
+      :busy="importingPlaylist"
+      busy-text="导入中…"
+      @cancel="closeImportConfirm"
+      @confirm="confirmImportPlaylist"
+    />
+
     <BatchQualityDialog
       :plan="batchDialog"
       :preferred-label="batchPreferredLabel"
@@ -201,7 +300,9 @@
 <script setup>
 defineOptions({ name: 'Search' })
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { useRouter } from 'vue-router'
 import BatchQualityDialog from '../components/BatchQualityDialog.vue'
+import ConfirmModal from '../components/ConfirmModal.vue'
 import CoverArt from '../components/CoverArt.vue'
 import ClearableInput from '../components/ClearableInput.vue'
 import TrackResultRow from '../components/TrackResultRow.vue'
@@ -219,10 +320,13 @@ import {
   buildDownloadTask,
 } from '../utils/musicPayload.js'
 import { useQualityMenuPosition } from '../utils/qualityMenu.js'
-import { playlistPickTarget, addToPickingPlaylist } from '../stores/library.js'
+import { playlistPickTarget, addToPickingPlaylist, importPlaylistFromLoaded } from '../stores/library.js'
 
+const router = useRouter()
 const MAX_PLAYLIST_QUEUE = 100
 const toast = ref(null)
+const importingPlaylist = ref(false)
+const importConfirm = ref(null)
 const qualityMenuId = ref(null)
 const showBatchQualityMenu = ref(false)
 const selectedKeys = ref(new Set())
@@ -272,25 +376,68 @@ const {
   showPagination,
   measureViewport,
 } = useTrackListView(() => searchState.results, {
-  paginateWhen: () => searchState.viewMode === 'album-detail',
+  paginateWhen: () => searchState.viewMode === 'album-detail' || searchState.viewMode === 'playlist-detail',
 })
 
-const isSearching = computed(() =>
-  searchState.searchMode === 'album' ? searchState.albumLoading : searchState.loading,
-)
+const searchPlaceholder = computed(() => {
+  if (searchState.searchMode === 'album') return '搜索专辑名、歌手...'
+  if (searchState.searchMode === 'playlist') return '搜索歌单名、关键词...'
+  return '搜索歌曲、歌手...'
+})
+
+const isSearching = computed(() => {
+  if (searchState.searchMode === 'album') return searchState.albumLoading
+  if (searchState.searchMode === 'playlist') {
+    return searchState.playlistLoading || searchState.playlistLoadingMore
+  }
+  return searchState.loading
+})
 const showAlbumGrid = computed(() =>
   searchState.searchMode === 'album' && searchState.viewMode !== 'album-detail',
 )
+const showPlaylistGrid = computed(() =>
+  searchState.searchMode === 'playlist' && searchState.viewMode !== 'playlist-detail',
+)
+const showPlaylistLoadBar = computed(() =>
+  searchState.viewMode === 'playlist-detail'
+  && (searchState.playlistLoading || searchState.playlistLoadingMore),
+)
+const playlistLoadProgress = computed(() => {
+  const total = searchState.playlistTotal || 0
+  const loaded = searchState.results.length
+  if (searchState.playlistLoading && !loaded) return 0
+  if (!total) return searchState.playlistLoadingMore ? 60 : 100
+  const pct = Math.round((loaded / total) * 100)
+  if (searchState.playlistLoadingMore) return Math.min(95, Math.max(pct, 8))
+  return Math.min(100, pct)
+})
+const playlistLoadLabel = computed(() => {
+  const total = searchState.playlistTotal || 0
+  const loaded = searchState.results.length
+  if (searchState.playlistLoading && !loaded) return '正在解析歌单...'
+  if (searchState.playlistLoadingMore) {
+    return total
+      ? `已加载 ${loaded} / ${total} 首，继续加载剩余歌曲...`
+      : '正在加载剩余歌曲...'
+  }
+  return '歌单加载完成'
+})
 const showSongResults = computed(() =>
   searchState.results.length > 0
-  && (searchState.searchMode === 'song' || searchState.viewMode === 'album-detail'),
+  && (
+    searchState.searchMode === 'song'
+    || searchState.viewMode === 'album-detail'
+    || searchState.viewMode === 'playlist-detail'
+  ),
 )
 const showSongEmpty = computed(() =>
   searchState.searched
   && !searchState.loading
   && !searchState.albumLoading
+  && !searchState.playlistLoading
   && !showSongResults.value
-  && !showAlbumGrid.value,
+  && !showAlbumGrid.value
+  && !showPlaylistGrid.value,
 )
 
 function getSelectedEntries() {
@@ -313,6 +460,8 @@ onUnmounted(() => {
   cancelSongSearch()
   cancelAlbumSearch()
   cancelAlbumOpen()
+  cancelPlaylistSearch()
+  cancelPlaylistOpen()
 })
 
 function isSelected(item, i) {
@@ -428,6 +577,10 @@ function switchSearchMode(mode) {
   searchState.results = []
   searchState.albumResults = []
   searchState.albumInfo = null
+  searchState.playlistResults = []
+  searchState.playlistInfo = null
+  searchState.playlistImportId = ''
+  searchState.playlistTotal = 0
   searchState.searched = false
   resetAlbumTrackPage()
   clearSelection()
@@ -440,8 +593,12 @@ function switchSource(key) {
   searchState.page = 1
   searchState.viewMode = 'list'
   searchState.albumInfo = null
+  searchState.playlistInfo = null
+  searchState.playlistImportId = ''
   searchState.results = []
   searchState.albumResults = []
+  searchState.playlistResults = []
+  searchState.playlistTotal = 0
   clearSelection()
   closeMenus()
   if (searchState.keyword.trim()) doSearch()
@@ -451,6 +608,8 @@ let searchSeq = 0
 let songSearchAbort = null
 let albumSearchAbort = null
 let albumOpenAbort = null
+let playlistSearchAbort = null
+let playlistOpenAbort = null
 
 function cancelSongSearch() {
   songSearchAbort?.abort()
@@ -467,6 +626,16 @@ function cancelAlbumOpen() {
   albumOpenAbort = null
 }
 
+function cancelPlaylistSearch() {
+  playlistSearchAbort?.abort()
+  playlistSearchAbort = null
+}
+
+function cancelPlaylistOpen() {
+  playlistOpenAbort?.abort()
+  playlistOpenAbort = null
+}
+
 function isAbortedError(e) {
   return e?.aborted || e?.name === 'AbortError' || e?.message === '请求已取消'
 }
@@ -478,6 +647,12 @@ async function doSearch() {
     searchState.albumInfo = null
     searchState.results = []
     return doAlbumSearch()
+  }
+  if (searchState.searchMode === 'playlist') {
+    searchState.viewMode = 'list'
+    searchState.playlistInfo = null
+    searchState.results = []
+    return doPlaylistSearch()
   }
 
   cancelSongSearch()
@@ -595,6 +770,179 @@ function backToAlbumList() {
   searchState.results = []
   clearSelection()
   closeMenus()
+}
+
+async function doPlaylistSearch() {
+  if (!searchState.keyword.trim() || !searchState.activeSource) return
+
+  cancelPlaylistSearch()
+  const controller = new AbortController()
+  playlistSearchAbort = controller
+  const seq = ++searchSeq
+  const source = searchState.activeSource
+  const keyword = searchState.keyword.trim()
+  const page = searchState.page
+
+  searchState.playlistLoading = true
+  searchState.searched = true
+  searchState.viewMode = 'list'
+  searchState.playlistInfo = null
+  searchState.playlistImportId = ''
+  searchState.playlistTotal = 0
+  searchState.results = []
+  closeMenus()
+  try {
+    const res = await api.search.searchPlaylists(keyword, source, page, { signal: controller.signal })
+    if (seq !== searchSeq || source !== searchState.activeSource) return
+    const data = res.data
+    searchState.playlistResults = data?.list || []
+    searchState.totalPages = data?.allPage || data?.totalPage || 1
+  } catch (e) {
+    if (isAbortedError(e)) return
+    if (seq !== searchSeq) return
+    searchState.playlistResults = []
+    searchState.totalPages = 1
+    showToast(e.message, 'error')
+  } finally {
+    if (playlistSearchAbort === controller) playlistSearchAbort = null
+    if (seq === searchSeq) searchState.playlistLoading = false
+  }
+}
+
+async function openPlaylist(item) {
+  if (!item?.id) return
+
+  cancelPlaylistOpen()
+  const controller = new AbortController()
+  playlistOpenAbort = controller
+  const seq = ++searchSeq
+  const source = item.source || searchState.activeSource
+  const input = String(item.id)
+
+  searchState.playlistLoading = true
+  searchState.playlistLoadingMore = false
+  searchState.viewMode = 'playlist-detail'
+  searchState.playlistImportId = input
+  searchState.results = []
+  searchState.playlistInfo = {
+    name: item.name,
+    img: item.img,
+    author: item.author,
+    play_count: item.play_count,
+    desc: item.desc,
+  }
+  searchState.playlistTotal = item.total || 0
+  clearSelection()
+  closeMenus()
+  try {
+    const partialRes = await api.playlist.fetch(input, source, { partial: true, signal: controller.signal })
+    if (seq !== searchSeq) return
+    const partialData = partialRes.data
+    searchState.results = (partialData.list || []).map(cleanTrackItem)
+    searchState.playlistInfo = partialData.info || searchState.playlistInfo
+    searchState.playlistTotal = partialData.total || searchState.results.length
+    searchState.playlistLoading = false
+    resetAlbumTrackPage()
+
+    if (partialData.hasMore) {
+      searchState.playlistLoadingMore = true
+      try {
+        const fullRes = await api.playlist.fetch(input, source, { signal: controller.signal })
+        if (seq !== searchSeq) return
+        const fullData = fullRes.data
+        searchState.results = (fullData.list || []).map(cleanTrackItem)
+        searchState.playlistInfo = fullData.info || searchState.playlistInfo
+        searchState.playlistTotal = fullData.total || searchState.results.length
+        resetAlbumTrackPage()
+      } catch (e) {
+        if (!isAbortedError(e)) showToast(e.message || '剩余歌曲加载失败', 'error')
+      } finally {
+        if (seq === searchSeq) searchState.playlistLoadingMore = false
+      }
+    }
+
+    if (!searchState.results.length) {
+      showToast('歌单为空或解析失败', 'error')
+    }
+  } catch (e) {
+    if (isAbortedError(e)) return
+    if (seq !== searchSeq) return
+    searchState.results = []
+    showToast(e.message, 'error')
+  } finally {
+    if (playlistOpenAbort === controller) playlistOpenAbort = null
+    if (seq === searchSeq) {
+      searchState.playlistLoading = false
+      searchState.playlistLoadingMore = false
+    }
+  }
+}
+
+function backToPlaylistList() {
+  cancelPlaylistOpen()
+  searchState.viewMode = 'list'
+  searchState.playlistInfo = null
+  searchState.playlistImportId = ''
+  searchState.playlistTotal = 0
+  searchState.results = []
+  clearSelection()
+  closeMenus()
+}
+
+async function importCurrentPlaylistToLibrary() {
+  if (searchState.viewMode !== 'playlist-detail') return
+  if (searchState.playlistLoading || searchState.playlistLoadingMore) {
+    showToast('歌单仍在加载，请稍后再导入', 'info')
+    return
+  }
+  if (!searchState.results.length) {
+    showToast('歌单为空，无法导入', 'info')
+    return
+  }
+  if (importingPlaylist.value || importConfirm.value) return
+
+  const info = searchState.playlistInfo || {}
+  const name = cleanText(info.name) || '导入的歌单'
+  importConfirm.value = {
+    name,
+    info,
+    cover: info.img || '',
+    message: `将「${name}」共 ${searchState.results.length} 首导入到音乐库歌单？`,
+    hint: '导入后可在「音乐库 → 歌单」中查看，并支持同步本地 / 网络更新。',
+  }
+}
+
+function closeImportConfirm() {
+  if (importingPlaylist.value) return
+  importConfirm.value = null
+}
+
+async function confirmImportPlaylist() {
+  const pending = importConfirm.value
+  if (!pending || importingPlaylist.value) return
+
+  importingPlaylist.value = true
+  try {
+    const result = importPlaylistFromLoaded({
+      name: pending.name,
+      source: searchState.activeSource,
+      url: searchState.playlistImportId || '',
+      tracks: searchState.results,
+      info: pending.info,
+    })
+    importConfirm.value = null
+    const localText = result.localMatched
+      ? `（已匹配本地 ${result.localMatched} 首）`
+      : ''
+    showToast(`已导入「${result.playlist?.name || pending.name}」${result.total} 首${localText}`, 'success')
+    if (result.playlist?.id) {
+      router.push({ path: '/library/playlists', query: { id: result.playlist.id } })
+    }
+  } catch (e) {
+    showToast(e.message || '导入失败', 'error')
+  } finally {
+    importingPlaylist.value = false
+  }
 }
 
 async function downloadOne(item, quality) {
@@ -737,6 +1085,47 @@ function showToast(text, type = 'info') {
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+.playlist-load-bar {
+  padding: 12px 16px;
+  margin-bottom: 12px;
+}
+.playlist-load-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.playlist-load-percent {
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+  font-weight: 600;
+}
+.playlist-load-track {
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: var(--bg-input);
+  overflow: hidden;
+  border: 1px solid var(--border-light);
+}
+.playlist-load-track.indeterminate .playlist-load-fill {
+  width: 35% !important;
+  animation: playlist-load-indeterminate 1.2s ease-in-out infinite;
+}
+.playlist-load-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--lemon-gradient, linear-gradient(90deg, var(--accent), #f59e0b));
+  transition: width 0.35s ease;
+}
+@keyframes playlist-load-indeterminate {
+  0% { transform: translateX(-120%); }
+  100% { transform: translateX(320%); }
 }
 
 .album-results { padding: 16px; margin-bottom: 16px; }

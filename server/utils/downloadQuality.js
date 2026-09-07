@@ -14,7 +14,7 @@ export const QUALITY_LABELS = {
   '128k': '128K',
   '320k': '320K',
   flac: 'FLAC',
-  flac24bit: 'FLAC 24bit',
+  flac24bit: 'FLAC Hi-Res',
   hires: 'Hi-Res',
   atmos: '杜比全景声',
   atmos_plus: '杜比全景声 Plus',
@@ -86,7 +86,8 @@ export function isRetryableDownloadError(error) {
   const code = error?.code || ''
   const text = `${message} ${code}`
   if (isNoActiveSourceError(error)) return false
-  // 试听片段：换其他激活音源再试同一音质
+  // 假无损 / 试听片段：换其他激活音源再试同一音质
+  if (code === 'FAKE_LOSSLESS' || /假无损|假 FLAC|不是有效 FLAC|不是 FLAC/i.test(message)) return true
   if (code === 'PREVIEW_CLIP' || /仅提供约.*试听片段|时长不完整/i.test(message)) return true
   if (/socket hang up|ECONNRESET|ETIMEDOUT|EPIPE|ECONNABORTED|ERR_SOCKET/i.test(text)) return true
   if (/timeout|timed out|请求超时|后端失败/i.test(text) && !/音源初始化超时/i.test(text)) return true

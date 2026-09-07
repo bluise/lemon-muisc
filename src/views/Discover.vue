@@ -145,15 +145,25 @@
               {{ batchDownloading ? '添加中...' : `批量下载${selectedCount ? ` (${selectedCount})` : ''}` }}
             </button>
             <div class="quality-menu" v-if="showBatchQualityMenu" :style="batchMenuStyle" @click.stop>
-              <div class="quality-menu-title">批量音质：不支持时将自动降为最接近可用音质</div>
-              <button
-                v-for="q in batchQualities"
-                :key="q"
-                class="quality-option"
-                @click="downloadSelected(q)"
-              >{{ getQualityLabel(q) }}</button>
+              <div class="quality-menu-title">批量音质：仅列出所选歌曲实际支持的音质</div>
+              <template v-if="batchQualities.length">
+                <button
+                  v-for="q in batchQualities"
+                  :key="q"
+                  class="quality-option"
+                  @click="downloadSelected(q)"
+                >{{ getQualityLabel(q) }}</button>
+              </template>
+              <div v-else class="quality-empty">所选歌曲暂无可用音质信息</div>
             </div>
           </div>
+          <button
+            class="btn-ghost btn-sm"
+            :disabled="!discoverState.results.length || discoverState.loading || discoverState.loadingMore || importingPlaylist"
+            @click="importCurrentPlaylistToLibrary"
+          >
+            {{ importingPlaylist ? '导入中...' : '导入到音乐库' }}
+          </button>
           <button class="btn-ghost btn-sm" @click="addAllToQueue">全部加入列表</button>
           <button class="btn-primary btn-sm" @click="playAll">播放全部</button>
         </div>
@@ -214,6 +224,19 @@
 
     <div v-if="toast" class="toast" :class="toast.type">{{ toast.text }}</div>
 
+    <ConfirmModal
+      :open="Boolean(importConfirm)"
+      title="导入到音乐库歌单"
+      :message="importConfirm?.message || ''"
+      :hint="importConfirm?.hint || ''"
+      :cover="importConfirm?.cover || ''"
+      confirm-text="导入"
+      :busy="importingPlaylist"
+      busy-text="导入中…"
+      @cancel="closeImportConfirm"
+      @confirm="confirmImportPlaylist"
+    />
+
     <BatchQualityDialog
       :plan="batchDialog"
       :preferred-label="batchPreferredLabel"
@@ -227,7 +250,9 @@
 <script setup>
 defineOptions({ name: 'Discover' })
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { useRouter } from 'vue-router'
 import BatchQualityDialog from '../components/BatchQualityDialog.vue'
+import ConfirmModal from '../components/ConfirmModal.vue'
 import CoverArt from '../components/CoverArt.vue'
 import TrackResultRow from '../components/TrackResultRow.vue'
 import { useBatchDownload, formatBatchDownloadToast } from '../composables/useBatchDownload.js'
@@ -244,9 +269,12 @@ import {
   buildDownloadTask,
 } from '../utils/musicPayload.js'
 import { useQualityMenuPosition } from '../utils/qualityMenu.js'
-import { playlistPickTarget, addToPickingPlaylist } from '../stores/library.js'
+import { playlistPickTarget, addToPickingPlaylist, importPlaylistFromLoaded } from '../stores/library.js'
 
+const router = useRouter()
 const toast = ref(null)
+const importingPlaylist = ref(false)
+const importConfirm = ref(null)
 const qualityMenuId = ref(null)
 const showBatchQualityMenu = ref(false)
 const selectedKeys = ref(new Set())
@@ -616,6 +644,62 @@ async function playAll() {
     showToast(tip, 'success')
   } catch (e) {
     showToast(e.message || '播放失败', 'error')
+  }
+}
+
+async function importCurrentPlaylistToLibrary() {
+  if (discoverState.viewMode !== 'detail') return
+  if (discoverState.loading || discoverState.loadingMore) {
+    showToast('歌单仍在加载，请稍后再导入', 'info')
+    return
+  }
+  if (!discoverState.results.length) {
+    showToast('歌单为空，无法导入', 'info')
+    return
+  }
+  if (importingPlaylist.value || importConfirm.value) return
+
+  const info = discoverState.playlistInfo || {}
+  const name = cleanText(info.name) || '导入的歌单'
+  importConfirm.value = {
+    name,
+    info,
+    cover: info.img || '',
+    message: `将「${name}」共 ${discoverState.results.length} 首导入到音乐库歌单？`,
+    hint: '导入后可在「音乐库 → 歌单」中查看，并支持同步本地 / 网络更新。',
+  }
+}
+
+function closeImportConfirm() {
+  if (importingPlaylist.value) return
+  importConfirm.value = null
+}
+
+async function confirmImportPlaylist() {
+  const pending = importConfirm.value
+  if (!pending || importingPlaylist.value) return
+
+  importingPlaylist.value = true
+  try {
+    const result = importPlaylistFromLoaded({
+      name: pending.name,
+      source: discoverState.activeSource,
+      url: String(discoverState.url || '').trim(),
+      tracks: discoverState.results,
+      info: pending.info,
+    })
+    importConfirm.value = null
+    const localText = result.localMatched
+      ? `（已匹配本地 ${result.localMatched} 首）`
+      : ''
+    showToast(`已导入「${result.playlist?.name || pending.name}」${result.total} 首${localText}`, 'success')
+    if (result.playlist?.id) {
+      router.push({ path: '/library/playlists', query: { id: result.playlist.id } })
+    }
+  } catch (e) {
+    showToast(e.message || '导入失败', 'error')
+  } finally {
+    importingPlaylist.value = false
   }
 }
 
