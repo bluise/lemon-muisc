@@ -213,4 +213,66 @@ const qualities = computed(() => props.item._qualities || getItemQualities(props
 
 .spin { animation: spin 1s linear infinite; }
 @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+/* 移动端布局必须在本组件内；父页对 .result-row 的样式会穿透到根节点 */
+@media (max-width: 768px) {
+  .result-row {
+    grid-template-columns: 28px minmax(0, 1fr) 36px 36px 36px;
+    grid-template-areas:
+      "check name play queue action"
+      "check meta play queue action";
+    gap: 2px 8px;
+    padding: 12px 12px;
+    align-items: center;
+    min-width: 0;
+  }
+  .col-index,
+  .col-album,
+  .col-duration {
+    display: none;
+  }
+  .col-check {
+    grid-area: check;
+    align-self: center;
+  }
+  .col-name {
+    grid-area: name;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    display: block;
+    font-size: 14px;
+    line-height: 1.35;
+  }
+  .col-singer {
+    grid-area: meta;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 12px;
+  }
+  .col-play {
+    grid-area: play;
+    align-self: center;
+  }
+  .col-queue {
+    grid-area: queue;
+    align-self: center;
+  }
+  .col-action {
+    grid-area: action;
+    align-self: center;
+  }
+  .playlist-add-btn {
+    display: none;
+  }
+  .play-btn,
+  .queue-add-btn,
+  .dl-btn {
+    width: 34px;
+    height: 34px;
+  }
+}
 </style>

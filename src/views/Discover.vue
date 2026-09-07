@@ -1127,28 +1127,18 @@ function showToast(text, type = 'info') {
 .results-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .batch-dl-wrap { display: inline-block; }
 
-.result-header, .result-row {
+/* 仅表头；曲目行样式在 TrackResultRow（父级 .result-row 会穿透到子根节点并覆盖移动端 grid） */
+.result-header {
   display: grid;
   grid-template-columns: 36px 48px minmax(180px, 2.2fr) minmax(120px, 1fr) minmax(120px, 1fr) 64px 44px 44px 44px;
   align-items: center;
   padding: 10px 16px;
   gap: 8px;
-  font-size: 13px;
-}
-.result-header {
   color: var(--text-muted);
   font-size: 12px;
   border-bottom: 1px solid var(--border-light);
   background: var(--bg-elevated);
 }
-.result-row {
-  border-bottom: 1px solid var(--border-light);
-  transition: background 0.15s;
-}
-.result-row:last-child { border-bottom: none; }
-.result-row:hover { background: var(--bg-hover); }
-.result-row.playing { background: var(--accent-muted); }
-.result-row.selected { background: var(--accent-muted); }
 
 .col-check {
   display: flex;
@@ -1205,7 +1195,6 @@ function showToast(text, type = 'info') {
   border: 1px solid var(--border);
 }
 .play-btn:hover { color: var(--accent); border-color: var(--accent); background: var(--accent-muted); }
-.result-row.playing .play-btn { color: var(--accent); border-color: var(--accent); background: var(--accent-muted); }
 
 .dl-btn {
   width: 32px;
@@ -1293,26 +1282,7 @@ function showToast(text, type = 'info') {
   .playlist-tags { justify-content: center; }
 
   .result-header { display: none; }
-  .result-row {
-    grid-template-columns: 28px 1fr 36px 36px 36px;
-    grid-template-areas: "check name play queue action" "check meta play queue action";
-    gap: 2px 8px;
-    padding: 12px 14px;
-  }
-  .col-index, .col-album, .col-duration { display: none; }
-  .col-check { grid-area: check; }
-  .col-name {
-    grid-area: name;
-    white-space: normal;
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-    line-height: 1.35;
-  }
-  .col-singer { grid-area: meta; font-size: 12px; }
-  .col-play { grid-area: play; }
-  .col-queue { grid-area: queue; }
-  .col-action { grid-area: action; }
+  /* 曲目行移动端布局见 TrackResultRow.vue（scoped 无法从此穿透） */
 
   .results-toolbar { flex-wrap: wrap; gap: 8px; }
   .mobile-select-all { display: inline-flex; }
