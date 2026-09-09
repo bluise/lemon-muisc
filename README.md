@@ -177,7 +177,7 @@
 | **风格样式** | 主题、配色、封面样式、音频可视化、音乐库歌曲列数 |
 | **下载设置** | 路径、文件名、并发、分组、同名文件处理 |
 | **我的账号** | 资料与邮箱；**备份导出 / 导入**（歌单、收藏、设置） |
-| **用户 / 邮件** | 多用户管理（管理员）、SMTP 验证与找回密码；可选日活统计开关 |
+| **用户 / 邮件** | 多用户管理（管理员）、SMTP 验证与找回密码；可选匿名用量统计开关 |
 | **内嵌数据 / 歌词文件** | 封面与歌词写入音频或 `.lrc` |
 
 ### 飞牛 NAS
@@ -291,41 +291,13 @@ CONFIG_PATH=/vol1/@appconf/lemon-music/config npm run auth:reset-users -- --yes
 
 ## 飞牛 NAS（FPK）
 
-本机配置好日活上报（可选但发布包建议配置）后：
-
 ```powershell
 npm run fpk:build
 ```
 
 生成 `fpk/lemon-music-1.2.13-x86.fpk` 与 `fpk/lemon-music-1.2.13-arm.fpk`（版本以 `fpk/manifest` 为准）。说明见 [docs/fpk-install.md](docs/fpk-install.md)。
 
-无上报测试包：`npm run fpk:build:no-telemetry`。
-
----
-
-## 日活统计（作者侧）
-
-默认开启开关；**仅当配置了上报地址与密钥时才会真正上报**（匿名安装 ID、版本、当日活跃分钟；不含歌单、路径、账号与歌曲）。管理员可在 **设置 → 邮件服务** 底部的「日活统计」关闭。
-
-### 隐私规则（仓库 vs 安装包）
-
-| 场景 | 怎么做 |
-|------|--------|
-| **git 提交 / 公开仓库** | **不要**提交真实上报 URL / 密钥 / 自有域名 |
-| **本地开发** | `TELEMETRY_URL` + `TELEMETRY_SECRET`，或 `server/telemetry.local.json`（gitignore） |
-| **Releases 用的 FPK** | **本机**配置好上述两项后执行 `npm run fpk:build`，脚本会把配置**注入安装包**再上传 Release |
-
-配置方式（任选）：
-
-1. 复制 [`server/telemetry.local.json.example`](server/telemetry.local.json.example) → `server/telemetry.local.json`
-2. 或环境变量 `TELEMETRY_URL`、`TELEMETRY_SECRET`（也可见 [`.env.example`](.env.example)）
-3. 本地文件可用 `urlB64` / `secretB64` 代替明文
-
-站点接收端：[`tools/lemon-telemetry-php/`](tools/lemon-telemetry-php/)，上传后编辑本地 `config.php`（勿提交）。
-
-**完整使用教程（部署接收端、配置上报、看板解读）：** [`docs/telemetry-stats-guide.md`](docs/telemetry-stats-guide.md)
-
-说明：仓库不含真实地址；FPK 解包仍可能看到注入的配置，防刷靠服务端密钥与限流。
+可选：`npm run fpk:build:no-telemetry` 打无上报测试包。
 
 ---
 
@@ -340,7 +312,7 @@ npm run fpk:build
 | `npm run auth:reset-password -- <用户> <新密码>` | 重置用户密码 |
 | `npm run auth:reset-users -- --list` | 查看用户（清空前预览） |
 | `npm run auth:reset-users -- --yes` | 清空所有用户并重新初始化 |
-| `npm run fpk:build` | 打包原生 FPK（需本地已配置 TELEMETRY，否则失败） |
+| `npm run fpk:build` | 打包原生 FPK |
 | `npm run fpk:build:no-telemetry` | 打包测试 FPK（不注入上报配置） |
 
 ---

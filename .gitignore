@@ -19,7 +19,10 @@ tools/regctl.exe
 .DS_Store
 Thumbs.db
 server/telemetry.local.json
+server/telemetry.local.json.example
 config/telemetry.local.json
+docs/telemetry-stats-guide.md
+tools/lemon-telemetry-php/
 tools/lemon-telemetry-php/config.php
 tools/lemon-telemetry-php/data/*.sqlite
 tools/lemon-telemetry-php/data/*.sqlite3

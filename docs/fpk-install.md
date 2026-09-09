@@ -42,13 +42,11 @@
 
 ## 本机打包
 
-发布 Releases 前，先在本机配置日活上报（`server/telemetry.local.json` 或环境变量 `TELEMETRY_URL` / `TELEMETRY_SECRET`），**勿把真实地址提交进仓库**。打包脚本会把配置注入 FPK：
-
 ```powershell
 npm run fpk:build
 ```
 
-无上报的测试包：
+测试包（不注入可选上报配置）：
 
 ```powershell
 npm run fpk:build:no-telemetry
