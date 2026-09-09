@@ -41,6 +41,7 @@ export function detectAudioContainer(filePath) {
   if (buf.slice(0, 4).toString('ascii') === 'RIFF' && n >= 12 && buf.slice(8, 12).toString('ascii') === 'WAVE') {
     return 'wav'
   }
+  if (buf.slice(0, 4).toString('ascii') === 'MAC ') return 'ape'
   if (buf.slice(0, 3).toString('ascii') === 'ID3') return 'mp3'
   // MPEG frame sync
   if (buf[0] === 0xff && (buf[1] & 0xe0) === 0xe0) return 'mp3'

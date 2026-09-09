@@ -1,4 +1,22 @@
-﻿# 柠檬音乐 v1.2.12
+# 柠檬音乐 v1.2.13
+
+## 更新内容
+
+### WAV / APE
+
+- 标签编辑支持保存 WAV（RIFF INFO + ID3）、APE（APEv2），含封面与歌词
+- 下载内嵌封面 / 歌词支持 WAV、APE
+- WAV 可直接播放；APE 需本机 ffmpeg 转码为 WAV 后播放
+
+本版仍为原生独立应用（不依赖 Docker），依赖应用中心 Node.js v22。
+
+## 安装 / 更新
+
+- x86：`lemon-music-1.2.13-x86.fpk`
+- ARM：`lemon-music-1.2.13-arm.fpk`
+
+---
+# 柠檬音乐 v1.2.12
 
 ## 更新内容
 

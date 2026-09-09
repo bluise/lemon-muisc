@@ -3,10 +3,18 @@ import fs from 'fs'
 import path from 'path'
 import { detectImageMime } from './utils/fetchPic.js'
 import { normalizeLyricText, pickBestLyricText } from './utils/lyric.js'
+import { writeWavMeta } from './utils/wavTag.js'
+import { writeApeMeta } from './utils/apeTag.js'
 
 export async function writeMeta(filePath, ext, meta) {
   if (ext === '.mp3') return writeMp3Meta(filePath, meta)
   if (ext === '.flac') return writeFlacMeta(filePath, meta)
+  if (ext === '.wav') {
+    return writeWavMeta(filePath, meta, { decodePicInput, atomicReplaceFile })
+  }
+  if (ext === '.ape') {
+    return writeApeMeta(filePath, meta, { decodePicInput, atomicReplaceFile })
+  }
   throw new Error(`暂不支持 ${ext} 格式写入标签`)
 }
 

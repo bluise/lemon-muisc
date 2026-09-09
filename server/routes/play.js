@@ -16,6 +16,7 @@ import { getDB } from '../db.js'
 import { buildSourceFallbackOffer, buildSourceInfoPayload, getSourceFallbackMode } from '../utils/sourceFallback.js'
 import { extractMusicUrl } from '../utils/sourceResult.js'
 import { appendStreamToken } from '../utils/streamAuth.js'
+import { ensureApePlayWav } from '../utils/apePlay.js'
 
 export const playRouter = Router()
 
@@ -44,6 +45,7 @@ const AUDIO_MIME = {
   '.oga': 'audio/ogg',
   '.opus': 'audio/ogg',
   '.wav': 'audio/wav',
+  '.ape': 'audio/ape',
   '.webm': 'audio/webm',
 }
 
@@ -100,16 +102,18 @@ playRouter.post('/url', async (req, res) => {
     const { songId, source, quality, sourceApiId, skipSourceIds, refresh } = req.body
     const localFilePath = resolveLocalFilePath(req.body)
 
-    // 本地文件：返回可流式播放的同源 URL
+    // 本地文件：返回可流式播放的同源 URL（APE 走转码缓存端点）
     if (localFilePath) {
       if (!isAllowedMediaPath(localFilePath)) {
         return res.status(400).json({ error: '本地文件不可用或不在允许目录内，请在设置中检查音乐库/下载路径' })
       }
-      const url = signPlayStreamUrl(
-        `/api/play/local?path=${encodeURIComponent(path.resolve(localFilePath))}`,
-        req,
-      )
-      return res.json({ ok: true, url, local: true })
+      const resolvedLocal = path.resolve(localFilePath)
+      const localExt = path.extname(resolvedLocal).toLowerCase()
+      const playPath = localExt === '.ape'
+        ? `/api/play/local-ape?path=${encodeURIComponent(resolvedLocal)}`
+        : `/api/play/local?path=${encodeURIComponent(resolvedLocal)}`
+      const url = signPlayStreamUrl(playPath, req)
+      return res.json({ ok: true, url, local: true, format: localExt.slice(1) || undefined })
     }
 
     if (source === 'local') {
@@ -216,8 +220,14 @@ playRouter.get('/local', (req, res) => {
     }
 
     const resolved = path.resolve(filePath)
-    const stat = fs.statSync(resolved)
     const ext = path.extname(resolved).toLowerCase()
+    if (ext === '.ape') {
+      return res.status(415).json({
+        error: 'APE 需转码后播放，请使用 /api/play/local-ape 或重新获取播放链接',
+      })
+    }
+
+    const stat = fs.statSync(resolved)
     const mime = AUDIO_MIME[ext] || 'application/octet-stream'
     const total = stat.size
     const range = req.headers.range
@@ -248,6 +258,63 @@ playRouter.get('/local', (req, res) => {
   } catch (e) {
     if (!res.headersSent) {
       res.status(500).json({ error: formatUserError(e, '读取本地文件失败') })
+    }
+  }
+})
+
+/** APE：ffmpeg 转成 WAV 缓存后再按本地文件流式输出（支持 Range） */
+playRouter.get('/local-ape', async (req, res) => {
+  try {
+    let filePath = req.query.path
+    if (!filePath || typeof filePath !== 'string') {
+      return res.status(400).json({ error: '缺少文件路径' })
+    }
+    try {
+      filePath = decodeURIComponent(filePath)
+    } catch {
+      filePath = String(filePath)
+    }
+    if (!isAllowedMediaPath(filePath)) {
+      return res.status(403).json({ error: '无权访问该文件' })
+    }
+
+    const resolved = path.resolve(filePath)
+    if (path.extname(resolved).toLowerCase() !== '.ape') {
+      return res.status(400).json({ error: '仅支持 APE 文件' })
+    }
+
+    const wavPath = await ensureApePlayWav(resolved)
+    const stat = fs.statSync(wavPath)
+    const total = stat.size
+    const range = req.headers.range
+
+    setLocalStreamHeaders(res, req)
+    res.setHeader('Accept-Ranges', 'bytes')
+    res.setHeader('Content-Type', 'audio/wav')
+    res.setHeader('Cache-Control', 'private, max-age=3600')
+
+    if (range) {
+      const m = /^bytes=(\d*)-(\d*)$/.exec(range)
+      if (!m) return res.status(416).end()
+      const start = m[1] ? parseInt(m[1], 10) : 0
+      const end = m[2] ? parseInt(m[2], 10) : total - 1
+      if (start >= total || end >= total || start > end) {
+        res.setHeader('Content-Range', `bytes */${total}`)
+        return res.status(416).end()
+      }
+      res.status(206)
+      res.setHeader('Content-Range', `bytes ${start}-${end}/${total}`)
+      res.setHeader('Content-Length', end - start + 1)
+      pipeLocalFile(res, wavPath, { start, end })
+      return
+    }
+
+    res.setHeader('Content-Length', total)
+    pipeLocalFile(res, wavPath)
+  } catch (e) {
+    if (!res.headersSent) {
+      const status = /ffmpeg|无法直接播放 APE/i.test(String(e?.message || '')) ? 415 : 500
+      res.status(status).json({ error: formatUserError(e, 'APE 播放失败') })
     }
   }
 })

@@ -258,7 +258,7 @@ tagRouter.post('/scan', async (req, res) => {
           tip = `目录 ${dirPath} 是空的。请确认路径正确，或到应用设置 → 运行设置 / 访问权限重新授权后保存。`
         }
       } else {
-        tip = `目录可读（共 ${probe.entryCount} 项），但未发现支持的音频（mp3/flac/wav/m4a 等）。样例：${probe.sampleNames.join(', ') || '无'}`
+        tip = `目录可读（共 ${probe.entryCount} 项），但未发现支持的音频（mp3/flac/wav/ape/m4a 等）。样例：${probe.sampleNames.join(', ') || '无'}`
       }
     }
 

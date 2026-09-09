@@ -1528,7 +1528,7 @@ async function writeMetaIfNeeded(task, meta, filePath, ext, settings) {
 
   const source = meta.source || task.source
   const musicInfo = buildMusicInfoFromTask(task, meta)
-  const canEmbed = ['.mp3', '.flac'].includes(ext)
+  const canEmbed = ['.mp3', '.flac', '.wav', '.ape'].includes(ext)
 
   let picBuf = null
   if (wantEmbedPic && canEmbed) {
