@@ -87,93 +87,127 @@
         <label v-if="batchMode" class="task-check">
           <input type="checkbox" :checked="isSelected(task.id)" @change="toggleSelect(task.id)" />
         </label>
+
+        <button
+          type="button"
+          class="task-cover"
+          :class="{ rippling: tappingTaskId === task.id, disabled: !canPreview(task) }"
+          :disabled="!canPreview(task)"
+          :title="previewTitle(task)"
+          @click="onTaskCoverClick(task)"
+        >
+          <div class="task-cover-media">
+            <CoverArt :src="taskCover(task)" />
+          </div>
+          <span class="task-cover-ripple" aria-hidden="true" />
+          <span
+            v-if="!showTaskProgress(task) && canPreview(task)"
+            class="task-play-overlay"
+          >
+            <svg v-if="isTaskCoverPauseIcon(task)" viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true">
+              <rect x="6" y="5" width="4" height="14" rx="1"/>
+              <rect x="14" y="5" width="4" height="14" rx="1"/>
+            </svg>
+            <svg v-else viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true">
+              <polygon points="7,3 21,12 7,21"/>
+            </svg>
+          </span>
+          <span
+            v-else-if="!showTaskProgress(task)"
+            class="cover-badge"
+            :class="'status-' + task.status"
+          >{{ statusIcon(task.status) }}</span>
+          <span v-else class="cover-pct">{{ progressPercent(task) }}%</span>
+        </button>
+
         <div class="task-info">
-          <div class="task-name">{{ task.name }}</div>
-          <div class="task-meta">{{ task.singer }} · {{ task.quality }} · {{ statusText(task.status) }}</div>
+          <div class="task-name" :title="task.name">{{ task.name }}</div>
+          <div class="task-meta">
+            <span class="meta-singer" :title="task.singer">{{ task.singer || '未知歌手' }}</span>
+            <span class="meta-dot" aria-hidden="true">·</span>
+            <span class="meta-quality">{{ task.quality || '-' }}</span>
+            <span class="meta-dot" aria-hidden="true">·</span>
+            <span class="meta-status" :class="'status-text-' + task.status">{{ statusText(task.status) }}</span>
+          </div>
           <div
             class="task-error"
             :class="{ warn: task.status === 'await_confirm' || task.status === 'await_source' || task.status === 'await_exist', errorish: task.status === 'error' }"
             v-if="task.status === 'error' || task.status === 'await_confirm' || task.status === 'await_source' || task.status === 'await_exist'"
           >
             <span class="task-error-text">{{ formatTaskError(task) }}</span>
+          </div>
+          <div class="task-progress" v-if="showTaskProgress(task)">
+            <div class="progress-bar">
+              <div class="progress-fill" :style="{ width: progressPercent(task) + '%' }"></div>
+            </div>
+          </div>
+          <div v-if="taskActionButtons(task).length" class="task-status-actions">
             <button
-              v-if="canRetry(task)"
+              v-for="btn in taskActionButtons(task)"
+              :key="btn.key"
               type="button"
-              class="task-error-retry"
-              :disabled="retryingTaskId === task.id"
-              @click="retryTask(task)"
-            >{{ retryingTaskId === task.id ? '重试中…' : '重试' }}</button>
+              class="btn-sm"
+              :class="btn.className"
+              :disabled="btn.disabled"
+              :title="btn.title"
+              @click="btn.onClick"
+            >{{ btn.label }}</button>
           </div>
         </div>
-        <div class="task-progress" v-if="showTaskProgress(task)">
-          <div class="progress-bar">
-            <div class="progress-fill" :style="{ width: progressPercent(task) + '%' }"></div>
-          </div>
-          <span class="progress-text">{{ progressPercent(task) }}%</span>
-        </div>
-        <div class="task-status" v-else>
-          <span :class="'status-' + task.status">{{ statusIcon(task.status) }}</span>
-        </div>
-        <div class="task-actions">
+
+        <MobileRowActions
+          :open="actionsOpenId === task.id"
+          @toggle="toggleRowActions(task.id)"
+          @close="actionsOpenId = ''"
+        >
           <button
-            class="play-btn"
+            type="button"
+            class="icon-action-btn"
+            :class="{ active: isTaskInQueue(task) }"
             :disabled="!canPreview(task)"
-            @click="togglePlay(task)"
-            :title="previewTitle(task)"
-          >
-            <svg v-if="isPlayingTask(task) && !isPaused" viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
-            <svg v-else-if="loadingPlay === trackId(task)" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" class="spin"><circle cx="12" cy="12" r="10" stroke-dasharray="50" stroke-dashoffset="20"/></svg>
-            <svg v-else viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>
-          </button>
-          <button
-            class="queue-add-btn"
-            :class="{ added: isTaskInQueue(task) }"
-            :disabled="!canPreview(task)"
-            @click="addOneToQueue(task)"
             :title="isTaskInQueue(task) ? '已在试听列表' : '加入试听列表'"
+            @click.stop="addOneToQueue(task)"
           >
-            <svg v-if="isTaskInQueue(task)" viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><polyline points="20 6 9 17 4 12" stroke="currentColor" stroke-width="2" fill="none"/></svg>
-            <svg v-else viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            <svg v-if="isTaskInQueue(task)" viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><polyline points="20 6 9 17 4 12" stroke="currentColor" stroke-width="2" fill="none"/></svg>
+            <svg v-else viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
           </button>
-          <button v-if="canResume(task)" class="btn-sm btn-ghost" @click="resume(task.id)" title="继续">继续</button>
-          <button v-if="canPause(task)" class="btn-sm btn-ghost" @click="pause(task.id)" title="暂停">暂停</button>
           <button
-            v-if="task.status === 'await_confirm'"
-            class="btn-sm btn-ghost"
-            @click="retrySameQuality(task)"
-            title="保持原音质再试：失败常因音源/网络短暂中断，稍后重试可能成功"
-          >重试原音质</button>
-          <button
-            v-if="task.status === 'await_confirm'"
-            class="btn-sm btn-primary"
-            @click="confirmDowngrade(task)"
-            :title="downgradeTitle(task)"
-          >降质下载</button>
-          <button v-if="task.status === 'await_confirm'" class="btn-sm btn-ghost" @click="rejectDowngrade(task)" title="标记为失败，不再自动处理">放弃</button>
-          <template v-if="task.status === 'await_exist'">
-            <button class="btn-sm btn-ghost" @click="skipExist(task)" title="保留本地文件，跳过本次下载">跳过</button>
-            <button class="btn-sm btn-primary" @click="confirmExist(task)" :title="existOverwriteTitle(task)">仍下载当前音质</button>
-          </template>
-          <template v-if="task.status === 'await_source'">
-            <button
-              v-for="alt in sourceFallbackAlternatives(task)"
-              :key="alt.id"
-              class="btn-sm btn-primary"
-              @click="confirmSourceSwitch(task, alt.id)"
-            >切到「{{ alt.name }}」</button>
-            <button class="btn-sm btn-ghost" @click="rejectSourceSwitch(task)">放弃</button>
-          </template>
-          <button v-if="canRetry(task)" class="btn-sm btn-primary" :disabled="retryingTaskId === task.id" @click="retryTask(task)" title="按当前音质重新排队下载">
-            {{ retryingTaskId === task.id ? '重试中…' : '重试' }}
+            type="button"
+            class="icon-action-btn"
+            title="加入歌单"
+            :disabled="!canPreview(task) && !task.file_path"
+            @click.stop="openPickPlaylist(task)"
+          >
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15V6"/><path d="M18.5 18a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z"/><path d="M12 12H3"/><path d="M16 6H3"/><path d="M12 18H3"/></svg>
           </button>
-          <button class="btn-sm btn-ghost" @click="dismiss(task.id)" title="移出列表，不删除已下载文件">移出</button>
+          <button
+            type="button"
+            class="icon-action-btn"
+            :class="{ 'fav-active': isTaskFavorite(task) }"
+            :title="isTaskFavorite(task) ? '取消收藏' : '收藏'"
+            :disabled="!canPreview(task) && !task.file_path"
+            @click.stop="onToggleTaskFavorite(task)"
+          >
+            <svg viewBox="0 0 24 24" width="16" height="16" :fill="isTaskFavorite(task) ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.6l-1-1a5.5 5.5 0 0 0-7.8 7.8l1 1L12 21l7.8-7.6 1-1a5.5 5.5 0 0 0 0-7.8z"/></svg>
+          </button>
+          <button
+            type="button"
+            class="icon-action-btn"
+            title="移出列表，不删除已下载文件"
+            @click.stop="dismiss(task.id)"
+          >
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18"/><path d="M6 6l12 12"/></svg>
+          </button>
           <button
             v-if="task.file_path"
-            class="btn-sm btn-ghost btn-danger-hover"
-            @click="remove(task.id)"
+            type="button"
+            class="icon-action-btn danger"
             title="删除列表记录并删除磁盘文件"
-          >删文件</button>
-        </div>
+            @click.stop="remove(task.id)"
+          >
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+          </button>
+        </MobileRowActions>
       </div>
     </div>
 
@@ -181,6 +215,14 @@
     <div v-else class="empty">暂无下载任务</div>
 
     <div v-if="toast" class="toast" :class="toast.type">{{ toast.text }}</div>
+
+    <PickPlaylistModal
+      v-if="pickPlaylistTrack"
+      :track="pickPlaylistTrack"
+      :source="pickPlaylistTrack.source || 'local'"
+      @close="pickPlaylistTrack = null"
+      @added="onAddedToPlaylist"
+    />
   </div>
 </template>
 
@@ -194,6 +236,11 @@ import {
   loadingPlay, isPaused, isPlayingItem, playItem, addToQueue, isInQueue,
 } from '../stores/player.js'
 import { formatUserError } from '../utils/userError.js'
+import { toPlayableCoverUrl } from '../utils/coverDisplay.js'
+import { localCoverUrl, isFavorite, toggleFavorite } from '../stores/library.js'
+import MobileRowActions from '../components/MobileRowActions.vue'
+import CoverArt from '../components/CoverArt.vue'
+import PickPlaylistModal from '../components/PickPlaylistModal.vue'
 
 const tasks = ref([])
 const toast = ref(null)
@@ -201,6 +248,65 @@ const batchMode = ref(false)
 const selectedIds = ref(new Set())
 const retryingFailed = ref(false)
 const retryingTaskId = ref('')
+const actionsOpenId = ref('')
+const pickPlaylistTrack = ref(null)
+const tappingTaskId = ref('')
+const coverPendingPauseId = ref('')
+
+/** 解析任务本地文件路径（兼容 file_path / filePath / meta 残留） */
+function resolveTaskFilePath(task) {
+  const direct = String(task?.file_path || task?.filePath || '').trim()
+  if (direct) return direct
+  const meta = task?.meta && typeof task.meta === 'object' ? task.meta : {}
+  const fromOffer = String(meta.existFileOffer?.filePath || '').trim()
+  if (fromOffer) return fromOffer
+  const arts = Array.isArray(meta.downloadArtifacts) ? meta.downloadArtifacts : []
+  for (const p of arts) {
+    const s = String(p || '').trim()
+    if (s) return s
+  }
+  return ''
+}
+
+function toggleRowActions(id) {
+  actionsOpenId.value = actionsOpenId.value === id ? '' : id
+}
+
+function taskFavoritePayload(task) {
+  const track = taskToTrack(task)
+  const filePath = resolveTaskFilePath(task)
+  if (filePath) {
+    return {
+      ...track,
+      localPath: filePath,
+      filePath,
+      source: 'local',
+    }
+  }
+  return track
+}
+
+function isTaskFavorite(task) {
+  return isFavorite(taskFavoritePayload(task))
+}
+
+function onToggleTaskFavorite(task) {
+  toggleFavorite(taskFavoritePayload(task))
+}
+
+function openPickPlaylist(task) {
+  const track = taskFavoritePayload(task)
+  pickPlaylistTrack.value = {
+    ...track,
+    picUrl: taskCover(task) || track.picUrl || '',
+  }
+}
+
+function onAddedToPlaylist({ playlist, duplicate }) {
+  pickPlaylistTrack.value = null
+  if (duplicate) showToast('歌曲已在歌单中', 'info')
+  else showToast(`已加入歌单：${playlist?.name || ''}`, 'success')
+}
 
 onMounted(() => loadList())
 onActivated(() => loadList())
@@ -270,6 +376,10 @@ unsubs.push(onWS('download:status', (d) => {
     t.meta = { ...(t.meta || {}), existFileOffer: d.existFileOffer }
   }
   if (d.filePath) t.file_path = d.filePath
+  else if (d.status === 'completed') {
+    const resolved = resolveTaskFilePath(t)
+    if (resolved) t.file_path = resolved
+  }
 }))
 unsubs.push(onWS('download:removed', (d) => {
   tasks.value = tasks.value.filter(x => x.id !== d.id)
@@ -341,6 +451,23 @@ const playableTasks = computed(() => tasks.value.filter(canPreview))
 
 function taskToTrack(task) {
   const meta = task.meta || {}
+  const filePath = resolveTaskFilePath(task)
+  // 已有本地文件：按本地曲目播放（与音乐库一致），避免再走在线音源失败却无声
+  if (filePath) {
+    return {
+      id: task.id,
+      key: `local:${filePath}`,
+      name: task.name,
+      singer: task.singer,
+      album: task.album || meta.album || '',
+      interval: task.interval,
+      localPath: filePath,
+      filePath,
+      source: 'local',
+      picUrl: meta.picUrl || meta.img || '',
+      img: meta.img || meta.picUrl || '',
+    }
+  }
   return {
     id: meta.songId || meta.songmid || meta.hash || meta.copyrightId || task.id,
     name: task.name,
@@ -352,9 +479,113 @@ function taskToTrack(task) {
     songmid: meta.songmid,
     hash: meta.hash,
     copyrightId: meta.copyrightId,
-    picUrl: meta.picUrl,
+    strMediaMid: meta.strMediaMid,
+    albumAudioId: meta.albumAudioId,
+    albumId: meta.albumId || meta.albumMid || meta.albummid,
+    albumMid: meta.albumMid || meta.albummid,
+    picUrl: meta.picUrl || meta.img || '',
+    img: meta.img || meta.picUrl || '',
     qualitys: meta.qualitys || [],
   }
+}
+
+function taskCover(task) {
+  const meta = task.meta || {}
+  const online = meta.picUrl || meta.img || ''
+  if (online) return toPlayableCoverUrl(online)
+  const filePath = resolveTaskFilePath(task)
+  if (filePath) return localCoverUrl(filePath)
+  return ''
+}
+
+function taskActionButtons(task) {
+  const buttons = []
+  if (canResume(task)) {
+    buttons.push({
+      key: 'resume',
+      label: '继续',
+      className: 'btn-ghost',
+      title: '继续',
+      onClick: () => resume(task.id),
+    })
+  }
+  if (canPause(task)) {
+    buttons.push({
+      key: 'pause',
+      label: '暂停',
+      className: 'btn-ghost',
+      title: '暂停',
+      onClick: () => pause(task.id),
+    })
+  }
+  if (task.status === 'await_confirm') {
+    buttons.push({
+      key: 'retry-same',
+      label: '重试原音质',
+      className: 'btn-ghost',
+      title: '保持原音质再试：失败常因音源/网络短暂中断，稍后重试可能成功',
+      onClick: () => retrySameQuality(task),
+    })
+    buttons.push({
+      key: 'downgrade',
+      label: '降质下载',
+      className: 'btn-primary',
+      title: downgradeTitle(task),
+      onClick: () => confirmDowngrade(task),
+    })
+    buttons.push({
+      key: 'reject-down',
+      label: '放弃',
+      className: 'btn-ghost',
+      title: '标记为失败，不再自动处理',
+      onClick: () => rejectDowngrade(task),
+    })
+  }
+  if (task.status === 'await_exist') {
+    buttons.push({
+      key: 'skip-exist',
+      label: '跳过',
+      className: 'btn-ghost',
+      title: '保留本地文件，跳过本次下载',
+      onClick: () => skipExist(task),
+    })
+    buttons.push({
+      key: 'confirm-exist',
+      label: '仍下载当前音质',
+      className: 'btn-primary',
+      title: existOverwriteTitle(task),
+      onClick: () => confirmExist(task),
+    })
+  }
+  if (task.status === 'await_source') {
+    for (const alt of sourceFallbackAlternatives(task)) {
+      buttons.push({
+        key: `src-${alt.id}`,
+        label: `切到「${alt.name}」`,
+        className: 'btn-primary',
+        title: `切换到 ${alt.name}`,
+        onClick: () => confirmSourceSwitch(task, alt.id),
+      })
+    }
+    buttons.push({
+      key: 'reject-src',
+      label: '放弃',
+      className: 'btn-ghost',
+      title: '放弃切换音源',
+      onClick: () => rejectSourceSwitch(task),
+    })
+  }
+  if (canRetry(task)) {
+    buttons.push({
+      key: 'retry',
+      label: retryingTaskId.value === task.id ? '重试中…' : '重试',
+      className: 'btn-primary',
+      title: '按当前音质重新排队下载',
+      disabled: retryingTaskId.value === task.id,
+      onClick: () => retryTask(task),
+    })
+  }
+  return buttons
 }
 
 function trackId(task) {
@@ -362,6 +593,9 @@ function trackId(task) {
 }
 
 function canPreview(task) {
+  if (resolveTaskFilePath(task)) return true
+  // 已完成但找不到本地文件：不要伪装成可在线试听
+  if (task.status === 'completed') return false
   const meta = task.meta || {}
   return !!(
     (task.source || meta.source)
@@ -370,29 +604,65 @@ function canPreview(task) {
 }
 
 function isPlayingTask(task) {
-  return isPlayingItem(taskToTrack(task))
+  const track = taskToTrack(task)
+  return isPlayingItem(track)
 }
 
 function isTaskInQueue(task) {
   const track = taskToTrack(task)
-  return isInQueue(track, track.source)
+  return isInQueue(track, track.source || 'local')
 }
 
 function previewTitle(task) {
-  if (!canPreview(task)) return '缺少歌曲信息，无法试听'
+  if (!canPreview(task)) {
+    if (task.status === 'completed' && !resolveTaskFilePath(task)) return '本地文件缺失，无法试听'
+    return '缺少歌曲信息，无法试听'
+  }
   return isPlayingTask(task) && !isPaused.value ? '暂停' : '试听'
+}
+
+function isTaskCoverPauseIcon(task) {
+  if (coverPendingPauseId.value === task.id) return true
+  if (!isPlayingTask(task)) return false
+  return !isPaused.value
 }
 
 async function togglePlay(task) {
   if (!canPreview(task)) {
-    showToast('该任务缺少歌曲信息，无法试听', 'error')
+    showToast(previewTitle(task), 'error')
     return
   }
   const track = taskToTrack(task)
+  // 有本地文件时与音乐库一致，强制 source=local
+  const source = resolveTaskFilePath(task) ? 'local' : (track.source || task.source)
   try {
-    await playItem(track, track.source)
+    await playItem(track, source)
   } catch (e) {
     showToast(e.message || '试听失败', 'error')
+  }
+}
+
+async function onTaskCoverClick(task) {
+  if (!canPreview(task)) {
+    showToast(previewTitle(task), 'error')
+    return
+  }
+  const id = task.id
+  tappingTaskId.value = id
+  setTimeout(() => {
+    if (tappingTaskId.value === id) tappingTaskId.value = ''
+  }, 560)
+
+  if (isPlayingTask(task) && !isPaused.value) {
+    coverPendingPauseId.value = ''
+  } else {
+    coverPendingPauseId.value = id
+  }
+
+  try {
+    await togglePlay(task)
+  } finally {
+    if (coverPendingPauseId.value === id) coverPendingPauseId.value = ''
   }
 }
 
@@ -459,8 +729,10 @@ function progressPercent(task) {
 }
 
 function normalizeDownloadTask(task) {
+  const file_path = resolveTaskFilePath(task)
   return {
     ...task,
+    file_path,
     progress: progressRatio(task),
   }
 }
@@ -932,7 +1204,7 @@ function showToast(text, type = 'info') {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 14px 18px;
+  padding: 10px 16px;
   border-bottom: 1px solid var(--border-light);
   transition: background 0.15s;
 }
@@ -948,37 +1220,170 @@ function showToast(text, type = 'info') {
 }
 .task-check input { accent-color: var(--accent); }
 
+.task-cover {
+  position: relative;
+  width: 48px;
+  height: 48px;
+  flex-shrink: 0;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  overflow: visible;
+  background: var(--bg-input);
+  cursor: pointer;
+}
+.task-cover:disabled,
+.task-cover.disabled {
+  cursor: default;
+  opacity: 0.85;
+}
+.task-cover-media {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  overflow: hidden;
+  background: var(--bg-input);
+}
+.task-cover-media :deep(.cover-art) {
+  width: 100%;
+  height: 100%;
+}
+.task-cover-media :deep(.cover-art-icon),
+.task-cover-media :deep(.cover-art-photo) {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.task-cover-ripple {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 68%;
+  height: 68%;
+  border-radius: 50%;
+  transform: translate(-50%, -50%) scale(0.3);
+  border: 2px solid rgba(125, 211, 252, 0.95);
+  box-shadow:
+    0 0 0 0 rgba(125, 211, 252, 0.5),
+    0 0 18px rgba(125, 211, 252, 0.28);
+  background: rgba(125, 211, 252, 0.18);
+  opacity: 0;
+  pointer-events: none;
+  z-index: 3;
+}
+.task-cover.rippling .task-cover-ripple {
+  animation: task-cover-ripple 0.65s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+@keyframes task-cover-ripple {
+  0% {
+    transform: translate(-50%, -50%) scale(0.35);
+    opacity: 0.95;
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(2.2);
+    opacity: 0;
+  }
+}
+.task-play-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: inherit;
+  background: rgba(0, 0, 0, 0.42);
+  color: #fff;
+  z-index: 4;
+  transition: background 0.18s ease, backdrop-filter 0.18s ease;
+  backdrop-filter: saturate(1);
+}
+.task-play-overlay svg {
+  transition: transform 0.22s ease, opacity 0.18s ease;
+}
+.task-cover.rippling .task-play-overlay {
+  background: color-mix(in srgb, var(--accent) 48%, rgba(0, 0, 0, 0.26));
+  backdrop-filter: saturate(1.35);
+}
+.task-cover.rippling .task-play-overlay svg {
+  transform: scale(1.28);
+}
+.cover-badge {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55);
+  font-size: 11px;
+  line-height: 18px;
+  text-align: center;
+  z-index: 5;
+}
+.cover-pct {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: inherit;
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  z-index: 4;
+}
+
 .task-info { flex: 1; min-width: 0; }
 .task-name { font-size: 14px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.task-meta { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+.task-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 0 6px;
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--text-muted);
+  min-width: 0;
+  overflow: hidden;
+}
+.task-meta .meta-singer {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  max-width: 42%;
+}
+.task-meta .meta-dot { opacity: 0.55; flex-shrink: 0; }
+.task-meta .meta-quality,
+.task-meta .meta-status { flex-shrink: 0; }
+.task-meta .meta-quality { text-transform: lowercase; }
+.task-meta .status-text-completed { color: var(--success); }
+.task-meta .status-text-error { color: var(--error); }
+.task-meta .status-text-downloading,
+.task-meta .status-text-waiting { color: var(--accent); }
+.task-meta .status-text-paused,
+.task-meta .status-text-await_confirm,
+.task-meta .status-text-await_source,
+.task-meta .status-text-await_exist { color: var(--warning); }
 .task-error { font-size: 12px; color: var(--error); margin-top: 2px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .task-error.warn { color: var(--warning); }
 .task-error.errorish { color: var(--error); }
-.task-error-text { flex: 1; min-width: 0; }
-.task-error-retry {
-  flex-shrink: 0;
-  padding: 2px 10px;
-  font-size: 12px;
-  line-height: 1.4;
-  color: var(--accent);
-  background: var(--accent-muted);
-  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
-  border-radius: 999px;
-  cursor: pointer;
+.task-error-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.task-error-retry:hover:not(:disabled) {
-  color: #fff;
-  background: var(--accent);
-}
-.task-error-retry:disabled { opacity: 0.6; cursor: not-allowed; }
 .status-await_confirm,
 .status-await_source { color: var(--warning); }
 .status-await_exist { color: var(--warning, var(--accent)); }
 
 .task-progress {
-  width: 140px;
-  min-width: 120px;
-  flex-shrink: 0;
+  margin-top: 6px;
+  width: 100%;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -986,7 +1391,7 @@ function showToast(text, type = 'info') {
 .progress-bar {
   flex: 1 1 auto;
   min-width: 72px;
-  height: 4px;
+  height: 3px;
   background: var(--border);
   border-radius: 2px;
   overflow: hidden;
@@ -1012,33 +1417,28 @@ function showToast(text, type = 'info') {
 .status-error { color: var(--error); }
 .status-waiting { color: var(--text-muted); }
 
-.task-actions { display: flex; gap: 4px; align-items: center; flex-shrink: 0; }
+.task-status-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+.task-status-actions .btn-sm {
+  padding: 4px 10px;
+  font-size: 12px;
+}
 
-.play-btn,
-.queue-add-btn {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  background: transparent;
-  color: var(--text-muted);
-  display: inline-flex;
+.task-item :deep(.mobile-row-actions) {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
   align-items: center;
-  justify-content: center;
-  padding: 0;
-  border: 1px solid var(--border);
-  transition: all 0.2s;
+  margin-left: auto;
 }
-.queue-add-btn { border-radius: var(--radius); }
-.play-btn:hover:not(:disabled),
-.queue-add-btn:hover:not(:disabled) {
-  color: var(--accent);
-  border-color: var(--accent);
-  background: var(--accent-muted);
+.task-item :deep(.icon-action-btn:disabled) {
+  opacity: 0.35;
+  cursor: not-allowed;
 }
-.play-btn:disabled,
-.queue-add-btn:disabled { opacity: 0.35; cursor: not-allowed; }
-.task-item.playing .play-btn { color: var(--accent); border-color: var(--accent); background: var(--accent-muted); }
-.queue-add-btn.added { color: var(--success); border-color: var(--success); background: rgba(52, 199, 89, 0.1); }
 
 .spin { animation: spin 1s linear infinite; }
 @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
@@ -1061,19 +1461,29 @@ function showToast(text, type = 'info') {
 
 @media (max-width: 768px) {
   .task-item {
-    flex-wrap: wrap;
-    align-items: flex-start;
     gap: 10px;
+    padding: 8px 12px;
+    align-items: center;
   }
-  .task-info { width: 100%; }
-  .task-name { white-space: normal; }
-  .task-progress { width: 100%; order: 3; }
-  .task-status { width: auto; }
-  .task-actions {
-    width: 100%;
-    margin-left: 0;
-    justify-content: flex-end;
-    flex-wrap: wrap;
+  .task-cover {
+    width: 46px;
+    height: 46px;
+    border-radius: 8px;
+  }
+  .task-info { min-width: 0; }
+  .task-name { font-size: 14px; }
+  .task-meta {
+    margin-top: 2px;
+    font-size: 11px;
+  }
+  .task-meta .meta-singer { max-width: 38%; }
+  .task-progress { margin-top: 4px; }
+  .task-status-actions { margin-top: 4px; }
+  .task-item :deep(.mobile-row-actions) { gap: 2px; }
+  .task-item :deep(.icon-action-btn) {
+    width: 34px;
+    height: 34px;
+    padding: 0;
   }
   .toast {
     left: 12px;

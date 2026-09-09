@@ -10,7 +10,20 @@ const req = (method, url, body, headers = {}) => {
 }
 
 const parseJSON = (buf) => {
-  try { return JSON.parse(buf.toString()) } catch { return null }
+  if (buf == null) return null
+  let text = Buffer.isBuffer(buf) ? buf.toString('utf8') : String(buf)
+  text = text.replace(/^\uFEFF/, '').trim()
+  if (!text) return null
+  try { return JSON.parse(text) } catch {}
+  // QQ 等接口偶发 JSONP / 前缀包裹
+  const start = text.search(/[\[{]/)
+  const endObj = text.lastIndexOf('}')
+  const endArr = text.lastIndexOf(']')
+  const end = Math.max(endObj, endArr)
+  if (start >= 0 && end > start) {
+    try { return JSON.parse(text.slice(start, end + 1)) } catch {}
+  }
+  return null
 }
 
 // --- 酷我 kw (单引号JSON需转换) ---
@@ -101,16 +114,43 @@ async function kgSearchComplex(keyword, page = 1, limit = 30) {
 }
 
 // --- QQ音乐 tx ---
+const TX_H5_HEADERS = {
+  Referer: 'https://y.qq.com/m/index.html',
+  'User-Agent':
+    'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1',
+}
+
+/** H5 搜索（旧 client_search_cp 对多数出口 IP 返回 500/空） t: 0 歌曲 / 8 专辑 */
+async function txH5Search(keyword, page = 1, limit = 30, type = 0) {
+  const url =
+    `https://c.y.qq.com/soso/fcgi-bin/search_for_qq_cp?g_tk=5381&uin=0&format=json` +
+    `&inCharset=utf-8&outCharset=utf-8&notice=0&platform=h5&needNewCode=1` +
+    `&w=${encodeURIComponent(keyword)}&zhidaqu=1&catZhida=1&t=${type}&flag=1&ie=utf-8&sem=1&aggr=0` +
+    `&perpage=${limit}&n=${limit}&p=${page}&remoteplace=txt.mqq.all`
+  let raw
+  try {
+    raw = await req('get', url, null, TX_H5_HEADERS)
+  } catch (e) {
+    throw new Error(e?.message || 'QQ音乐搜索网络异常，请稍后重试')
+  }
+  const data = parseJSON(raw)
+  if (!data) {
+    throw new Error('QQ音乐搜索返回异常，请稍后重试')
+  }
+  if (data.code !== 0) {
+    throw new Error(`QQ音乐搜索失败(${data.code})，请稍后重试`)
+  }
+  return data
+}
+
 async function txSearch(keyword, page = 1, limit = 30) {
-  const buf = await req('get',
-    `https://c.y.qq.com/soso/fcgi-bin/client_search_cp?w=${encodeURIComponent(keyword)}&p=${page}&n=${limit}&format=json&cr=1&catZhida=1&t=0`,
-    null, { Referer: 'https://y.qq.com' })
-  const data = parseJSON(buf)
-  if (!data?.data?.song?.list) return { list: [], allPage: 0, total: 0 }
-  const total = data.data.song.totalnum || 0
+  const data = await txH5Search(keyword, page, limit, 0)
+  const list = data?.data?.song?.list
+  if (!Array.isArray(list)) return { list: [], allPage: 0, total: 0 }
+  const total = data.data.song.totalnum || list.length
   return {
-    list: data.data.song.list.map(mapTxSongItem),
-    allPage: Math.ceil(total / limit),
+    list: list.map(mapTxSongItem),
+    allPage: Math.max(1, Math.ceil(total / limit)),
     total,
   }
 }
@@ -225,7 +265,15 @@ export async function kgResolveAlbumCover(albumId) {
   }
   const pending = (async () => {
     try {
-      const data = await kgFetchMobileJson(`http://mobilecdn.kugou.com/api/v3/album/info?albumid=${encodeURIComponent(id)}`, 1)
+      let data = null
+      for (const host of KG_MOBILE_HOSTS) {
+        try {
+          data = await kgFetchMobileJson(`${host}/api/v3/album/info?albumid=${encodeURIComponent(id)}`, 1)
+          if (data?.data) break
+        } catch {
+          data = null
+        }
+      }
       const img = String(data?.data?.imgurl || data?.data?.img || '').replace(/\{size\}/g, '400')
       kgAlbumCoverCache.set(id, img || '')
       return img || ''
@@ -541,7 +589,9 @@ function mapTxSongItem(item) {
   const albumMid = item.album?.mid || item.albummid || ''
   const albumName = cleanHtml(item.album?.name || item.albumname || '')
   const songmid = item.mid || item.songmid || ''
-  const songId = item.id != null && item.id !== '' ? String(item.id) : songmid
+  const songId = item.id != null && item.id !== ''
+    ? String(item.id)
+    : (item.songid != null && item.songid !== '' ? String(item.songid) : songmid)
   const strMediaMid = item.file?.media_mid || item.strMediaMid || item.media_mid || ''
   const img = txCoverUrl(item, albumMid, albumName)
 
@@ -638,21 +688,23 @@ async function wyAlbumSearch(keyword, page = 1, limit = 30) {
 }
 
 async function txAlbumSearch(keyword, page = 1, limit = 30) {
-  const buf = await req('get',
-    `https://c.y.qq.com/soso/fcgi-bin/client_search_cp?w=${encodeURIComponent(keyword)}&p=${page}&n=${limit}&format=json&cr=1&t=8`,
-    null, { Referer: 'https://y.qq.com' })
-  const data = parseJSON(buf)
-  if (!data?.data?.album?.list) return { list: [], allPage: 0, total: 0 }
-  const total = data.data.album.totalnum || 0
-  return buildAlbumSearchResult(data.data.album.list.map(item => mapAlbumItem({
-    id: item.albumMID || item.albumid,
-    name: item.albumName,
-    artist: item.singer,
-    img: item.albumPic || (item.albumMID ? `https://y.gtimg.cn/music/photo_new/T002R300x300M000${item.albumMID}.jpg` : ''),
-    publishTime: item.publicTime || '',
-    count: item.song_count || 0,
-    source: 'tx',
-  })), total, limit)
+  const data = await txH5Search(keyword, page, limit, 8)
+  const list = data?.data?.album?.list
+  if (!Array.isArray(list) || !list.length) return { list: [], allPage: 0, total: 0 }
+  const total = data.data.album.totalnum || list.length
+  return buildAlbumSearchResult(list.map(item => {
+    const albumMid = item.albumMID || item.albummid || item.albumId || ''
+    return mapAlbumItem({
+      id: albumMid || item.albumID || item.albumid,
+      name: item.albumName || item.albumname || item.name,
+      artist: item.singerName || item.singer || item.singername || '',
+      img: item.albumPic
+        || (albumMid ? `https://y.gtimg.cn/music/photo_new/T002R300x300M000${albumMid}.jpg` : ''),
+      publishTime: item.publicTime || '',
+      count: item.song_count || item.songnum || 0,
+      source: 'tx',
+    })
+  }), total, limit)
 }
 
 function formatWyAlbumArtists(artist, artists) {
@@ -778,21 +830,29 @@ async function wyPlaylistSearch(keyword, page = 1, limit = 30) {
 }
 
 async function txPlaylistSearch(keyword, page = 1, limit = 30) {
-  const buf = await req('get',
-    `https://c.y.qq.com/soso/fcgi-bin/client_search_cp?w=${encodeURIComponent(keyword)}&p=${page}&n=${limit}&format=json&cr=1&t=3`,
-    null, { Referer: 'https://y.qq.com' })
-  const data = parseJSON(buf)
-  const list = data?.data?.diss?.list || data?.data?.playlist?.list || []
+  // client_search_cp 歌单搜索已失效；专用歌单搜索接口仍可用
+  const url =
+    `https://c.y.qq.com/soso/fcgi-bin/client_music_search_songlist` +
+    `?remoteplace=txt.yqq.center&searchid=${Date.now()}&page_no=${page}&num_per_page=${limit}` +
+    `&query=${encodeURIComponent(keyword)}&format=json&outCharset=utf-8`
+  const data = parseJSON(await req('get', url, null, {
+    Referer: 'https://y.qq.com/',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  }))
+  if (!data || data.code !== 0) {
+    throw new Error('QQ音乐歌单搜索失败，请稍后重试')
+  }
+  const list = data?.data?.list || []
   if (!list.length) return { list: [], allPage: 0, total: 0 }
-  const total = data.data?.diss?.totalnum || data.data?.playlist?.totalnum || list.length
+  const total = data.data.display_num || data.data.sum || list.length
   return buildPlaylistSearchResult(list.map(item => mapRecommendItem({
     id: item.dissid || item.tid || item.id,
-    name: item.dissname || item.title || item.name,
+    name: cleanHtml(item.dissname || item.title || item.name || ''),
     author: item.creator?.name || item.nickname || item.creator_name || '',
     img: item.imgurl || item.cover_url_medium || item.logo || '',
     play_count: formatPlayCount(item.listennum || item.access_num || item.play_count),
     total: item.song_count || item.songnum || item.total || 0,
-    desc: item.introduction || item.desc || '',
+    desc: cleanHtml(item.introduction || item.desc || ''),
     source: 'tx',
   })), total, limit)
 }
@@ -1586,11 +1646,24 @@ const KG_HEADERS = {
 }
 
 function parseKgTagResponse(buf) {
-  const text = Buffer.isBuffer(buf) ? buf.toString() : String(buf || '')
-  const match = text.match(/<!--KG_TAG_RES_START-->([\s\S]*?)<!--KG_TAG_RES_END-->/)
+  let text = Buffer.isBuffer(buf) ? buf.toString() : String(buf || '')
+  text = text.replace(/^\uFEFF/, '').trim()
+  const startMark = '<!--KG_TAG_RES_START-->'
+  const endMark = '<!--KG_TAG_RES_END-->'
+  const start = text.indexOf(startMark)
+  if (start >= 0) {
+    const from = start + startMark.length
+    const end = text.indexOf(endMark, from)
+    text = text.slice(from, end >= 0 ? end : undefined).trim()
+  }
   try {
-    return JSON.parse(match ? match[1] : text.trim())
+    return JSON.parse(text)
   } catch {
+    const i = text.indexOf('{')
+    const j = text.lastIndexOf('}')
+    if (i >= 0 && j > i) {
+      try { return JSON.parse(text.slice(i, j + 1)) } catch { return null }
+    }
     return null
   }
 }
@@ -1640,9 +1713,19 @@ async function kgFetchMobileJson(url, retries = 1) {
   throw lastErr || new Error('酷狗接口请求失败')
 }
 
-function kgMobileSongPageUrl(specialId, page, pageSize) {
-  return `http://mobilecdn.kugou.com/api/v3/special/song?plat=0&specialid=${specialId}&page=${page}&pagesize=${pageSize}&version=8352&with_res_tag=1`
+function kgMobileSongPageUrl(specialId, page, pageSize, host = 'https://mobilecdn.kugou.com') {
+  return `${host}/api/v3/special/song?plat=0&specialid=${specialId}&page=${page}&pagesize=${pageSize}&version=9108&with_res_tag=1`
 }
+
+function kgMobileInfoUrl(specialId, host = 'https://mobilecdn.kugou.com') {
+  return `${host}/api/v3/special/info?specialid=${specialId}`
+}
+
+const KG_MOBILE_HOSTS = [
+  'https://mobilecdn.kugou.com',
+  'http://mobilecdn.kugou.com',
+  'http://mobilecdnbj.kugou.com',
+]
 
 function kgMapMobilePlaylistInfo(infoPayload = {}) {
   return {
@@ -1660,29 +1743,46 @@ function kgMapMobileSongPage(data) {
   return { batch, total }
 }
 
-async function kgFetchMobilePlaylistPages(specialId, { pageSize = 300, partial = false } = {}) {
-  const infoUrl = `http://mobilecdn.kugou.com/api/v3/special/info?specialid=${specialId}`
-  const [infoData, firstData] = await Promise.all([
-    kgFetchMobileJson(infoUrl).catch(() => null),
-    kgFetchMobileJson(kgMobileSongPageUrl(specialId, 1, pageSize)),
-  ])
-  if (firstData?.status !== 1 || !firstData.data) throw new Error('无法获取酷狗歌单')
+async function kgFetchMobilePlaylistPages(specialId, { pageSize = 100, partial = false } = {}) {
+  let infoData = null
+  let firstData = null
+  let activeHost = KG_MOBILE_HOSTS[0]
+  let lastErr = null
+
+  for (const host of KG_MOBILE_HOSTS) {
+    try {
+      const [info, first] = await Promise.all([
+        kgFetchMobileJson(kgMobileInfoUrl(specialId, host)).catch(() => null),
+        kgFetchMobileJson(kgMobileSongPageUrl(specialId, 1, pageSize, host)),
+      ])
+      if (first?.status === 1 && first.data) {
+        infoData = info
+        firstData = first
+        activeHost = host
+        break
+      }
+      lastErr = new Error('无法获取酷狗歌单')
+    } catch (e) {
+      lastErr = e
+    }
+  }
+  if (!firstData) throw lastErr || new Error('无法获取酷狗歌单')
 
   const { batch: firstBatch, total } = kgMapMobileSongPage(firstData)
   if (!firstBatch.length) throw new Error('无法获取酷狗歌单')
   const info = kgMapMobilePlaylistInfo(infoData?.data || {})
   const playlistCover = info.img || ''
 
+  // 首屏（partial）只用歌单封面兜底，避免上百次专辑封面请求拖过 30s 超时
   if (partial) {
-    const list = await enrichKgSongsCoversByAlbum(firstBatch, { playlistCover })
+    const list = applyPlaylistTrackCoverFallback(firstBatch, playlistCover)
     const infoFinal = finalizePlaylistInfo(info, list)
-    const enriched = applyPlaylistTrackCoverFallback(list, infoFinal.img || playlistCover)
     return {
-      list: enriched,
+      list: applyPlaylistTrackCoverFallback(list, infoFinal.img || playlistCover),
       total,
       source: 'kg',
       info: infoFinal,
-      hasMore: total > enriched.length,
+      hasMore: total > list.length,
       partial: true,
     }
   }
@@ -1691,7 +1791,9 @@ async function kgFetchMobilePlaylistPages(specialId, { pageSize = 300, partial =
   const pageResults = [firstBatch]
   if (totalPages > 1) {
     const rest = await Promise.all(
-      Array.from({ length: totalPages - 1 }, (_, i) => kgFetchMobileJson(kgMobileSongPageUrl(specialId, i + 2, pageSize))),
+      Array.from({ length: totalPages - 1 }, (_, i) => (
+        kgFetchMobileJson(kgMobileSongPageUrl(specialId, i + 2, pageSize, activeHost))
+      )),
     )
     for (const data of rest) {
       if (data?.status === 1 && data.data) {
@@ -1783,9 +1885,13 @@ async function kgPlaylistFromHtml(id) {
 async function kgPlaylistFromSpecial(id, options = {}) {
   try {
     return await kgPlaylistFromMobileApi(id, options)
-  } catch {
-    if (options.partial) throw new Error('无法获取酷狗歌单')
-    return kgPlaylistFromHtml(id)
+  } catch (mobileErr) {
+    try {
+      // partial 首屏也曾直接抛错跳过官网 HTML；移动端接口失败时仍应兜底
+      return await kgPlaylistFromHtml(id)
+    } catch {
+      throw mobileErr instanceof Error ? mobileErr : new Error('无法获取酷狗歌单')
+    }
   }
 }
 

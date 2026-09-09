@@ -20,8 +20,10 @@ fix_desktop_db() {
   }
 
   run_sql "UPDATE app SET is_docker = false, micro_app = false WHERE app_name = '${appname}';" || true
-  # type=url：新标签打开网页；is_admin=true：便于上桌面
-  run_sql "UPDATE app_service SET no_display = false, is_admin = true, type = 'url' WHERE app_id IN (SELECT id FROM app WHERE app_name = '${appname}');" || true
+  # 只修正入口可见性/打开方式，不要改 is_admin：
+  # 飞牛「谁可以访问」对应 app_service.is_admin（true=仅管理员）。
+  # 以前每次启用都写 is_admin=true，会覆盖用户在设置里选的「设备内所有用户」。
+  run_sql "UPDATE app_service SET no_display = false, type = 'url' WHERE app_id IN (SELECT id FROM app WHERE app_name = '${appname}');" || true
 }
 
 ensure_desktop_entry() {

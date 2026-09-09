@@ -107,7 +107,7 @@
       </div>
       <button
         v-if="currentPlaying"
-        class="ctrl-btn ctrl-sleep"
+        class="ctrl-btn ctrl-sleep desktop-extra"
         type="button"
         :class="{ active: sleepTimerMinutes > 0 }"
         :title="sleepTimerMinutes ? `睡眠定时剩余 ${sleepTimerLeftLabel || sleepTimerMinutes + 'm'}（再点切换）` : '睡眠定时：15/30/45/60/90 分钟'"
@@ -121,7 +121,7 @@
       </button>
       <button
         v-if="currentPlaying"
-        class="ctrl-btn ctrl-fav"
+        class="ctrl-btn ctrl-fav desktop-extra"
         :class="{ active: isCurrentFavorite }"
         type="button"
         :title="isCurrentFavorite ? '取消收藏' : '收藏'"
@@ -141,13 +141,81 @@
           <line x1="7" y1="7" x2="7.01" y2="7"/>
         </svg>
       </button>
-      <button ref="queueBtnRef" class="ctrl-btn ctrl-queue" @click="onToggleQueuePanel" :title="`试听列表 (${playQueue.length})`" :class="{ active: showQueuePanel }">
+      <button ref="queueBtnRef" class="ctrl-btn ctrl-queue desktop-extra" @click="onToggleQueuePanel" :title="`试听列表 (${playQueue.length})`" :class="{ active: showQueuePanel }">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
           <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/>
           <circle cx="4" cy="6" r="1" fill="currentColor"/><circle cx="4" cy="12" r="1" fill="currentColor"/><circle cx="4" cy="18" r="1" fill="currentColor"/>
         </svg>
         <span v-if="playQueue.length" class="queue-badge">{{ playQueue.length }}</span>
       </button>
+
+      <!-- 窄屏：定时 / 收藏 / 列表折叠到「更多」 -->
+      <div
+        class="player-more compact-only"
+        ref="moreWrapRef"
+        :class="{ open: showMorePanel }"
+      >
+        <button
+          class="ctrl-btn ctrl-more"
+          type="button"
+          :class="{ active: showMorePanel || sleepTimerMinutes > 0 || showQueuePanel }"
+          :title="moreBtnTitle"
+          @click.stop="toggleMorePanel"
+        >
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+            <circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/>
+          </svg>
+          <span v-if="playQueue.length" class="queue-badge">{{ playQueue.length > 99 ? '99+' : playQueue.length }}</span>
+        </button>
+        <div v-if="showMorePanel" class="more-popover card" @click.stop>
+          <button
+            type="button"
+            class="more-item"
+            :class="{ active: sleepTimerMinutes > 0 }"
+            @click="cycleSleepTimer"
+          >
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"/>
+            </svg>
+            <span>{{ sleepTimerMinutes ? `定时 ${sleepTimerLeftLabel || sleepTimerMinutes + 'm'}` : '睡眠定时' }}</span>
+          </button>
+          <button
+            type="button"
+            class="more-item"
+            :class="{ active: isCurrentFavorite }"
+            :disabled="!currentPlaying"
+            @click="onToggleFavorite"
+          >
+            <svg viewBox="0 0 24 24" width="16" height="16" :fill="isCurrentFavorite ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.6l-1-1a5.5 5.5 0 0 0-7.8 7.8l1 1L12 21l7.8-7.6 1-1a5.5 5.5 0 0 0 0-7.8z"/></svg>
+            <span>{{ isCurrentFavorite ? '取消收藏' : '收藏' }}</span>
+          </button>
+          <button
+            v-if="currentLocalPath"
+            type="button"
+            class="more-item"
+            @click="onMoreOpenTagEdit"
+          >
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/>
+              <line x1="7" y1="7" x2="7.01" y2="7"/>
+            </svg>
+            <span>标签编辑</span>
+          </button>
+          <button
+            type="button"
+            class="more-item"
+            :class="{ active: showQueuePanel }"
+            @click="onMoreOpenQueue"
+          >
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/>
+              <circle cx="4" cy="6" r="1" fill="currentColor"/><circle cx="4" cy="12" r="1" fill="currentColor"/><circle cx="4" cy="18" r="1" fill="currentColor"/>
+            </svg>
+            <span>试听列表{{ playQueue.length ? ` (${playQueue.length})` : '' }}</span>
+          </button>
+        </div>
+      </div>
+
       <div
         class="player-volume"
         ref="volumeWrapRef"
@@ -262,11 +330,13 @@ import { isMobileUiContext } from '../utils/device.js'
 
 const queuePanelRef = ref(null)
 const queueBtnRef = ref(null)
+const moreWrapRef = ref(null)
 const playerBarRef = ref(null)
 const volumeWrapRef = ref(null)
 const isCompact = ref(false)
 const mobileLayoutTick = ref(0)
 const showVolumePanel = ref(false)
+const showMorePanel = ref(false)
 
 function onCoverError() {
   tryFillCoverFromNetwork()
@@ -340,8 +410,19 @@ function updateMobilePlayer() {
 
 watch(isCompact, (compact) => {
   document.documentElement.style.setProperty('--player-height', compact ? '76px' : '64px')
-  if (!compact) showVolumePanel.value = false
+  if (!compact) {
+    showVolumePanel.value = false
+    showMorePanel.value = false
+  }
 }, { immediate: true })
+
+const moreBtnTitle = computed(() => {
+  const parts = ['更多']
+  if (sleepTimerMinutes.value) parts.push(`定时 ${sleepTimerLeftLabel.value || sleepTimerMinutes.value + 'm'}`)
+  if (currentLocalPath.value) parts.push('可编辑标签')
+  if (playQueue.value.length) parts.push(`列表 ${playQueue.value.length}`)
+  return parts.join(' · ')
+})
 
 const RING_CENTER = 26
 const DISC_RING_RADIUS = 22
@@ -391,10 +472,14 @@ onUnmounted(() => {
 function onDocumentClick(e) {
   if (showFullscreenPlayer.value) return
   const t = e.target
+  if (showMorePanel.value) {
+    if (!moreWrapRef.value?.contains(t)) showMorePanel.value = false
+  }
   if (showQueuePanel.value) {
     const panel = queuePanelRef.value
     const btn = queueBtnRef.value
-    if (!panel?.contains(t) && !btn?.contains(t)) showQueuePanel.value = false
+    const more = moreWrapRef.value
+    if (!panel?.contains(t) && !btn?.contains(t) && !more?.contains(t)) showQueuePanel.value = false
   }
   if (showVolumePanel.value) {
     if (!volumeWrapRef.value?.contains(t)) showVolumePanel.value = false
@@ -403,6 +488,22 @@ function onDocumentClick(e) {
 
 function onToggleQueuePanel() {
   showQueuePanel.value = !showQueuePanel.value
+  if (showQueuePanel.value) showMorePanel.value = false
+}
+
+function toggleMorePanel() {
+  showMorePanel.value = !showMorePanel.value
+  if (showMorePanel.value) showQueuePanel.value = false
+}
+
+function onMoreOpenQueue() {
+  showMorePanel.value = false
+  showQueuePanel.value = true
+}
+
+function onMoreOpenTagEdit() {
+  showMorePanel.value = false
+  onOpenTagEdit()
 }
 
 function onSeek(e) { seekTo(Number(e.target.value)) }
@@ -1183,8 +1284,9 @@ async function onQueuePlayClick(index) {
 }
 
 .player-bar.compact .player-name {
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.3;
+  max-width: none;
 }
 
 .player-bar.compact .player-lyric {
@@ -1207,7 +1309,7 @@ async function onQueuePlayClick(index) {
 .player-bar.compact .bar-center {
   flex-shrink: 0;
   gap: 2px;
-  margin: 0 6px;
+  margin: 0 4px;
 }
 
 .player-bar.compact .ctrl-main {
@@ -1225,7 +1327,8 @@ async function onQueuePlayClick(index) {
 .player-bar.compact .ctrl-sub[title="停止"],
 .player-bar.compact .ctrl-tag,
 .player-bar.compact .player-progress,
-.player-bar.compact .player-volume {
+.player-bar.compact .player-volume,
+.player-bar.compact .desktop-extra {
   display: none;
 }
 
@@ -1233,6 +1336,83 @@ async function onQueuePlayClick(index) {
   flex: 0 0 auto;
   width: auto;
   margin-left: 0;
+  gap: 4px;
+}
+
+.compact-only {
+  display: none;
+}
+
+.player-bar.compact .compact-only {
+  display: inline-flex;
+  position: relative;
+  flex-shrink: 0;
+}
+
+.player-bar.compact .ctrl-more {
+  width: 38px;
+  height: 38px;
+  border-radius: var(--radius);
+  background: transparent;
+  border: 1px solid var(--border);
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  position: relative;
+}
+
+.player-bar.compact .ctrl-more:hover,
+.player-bar.compact .ctrl-more.active {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-muted);
+}
+
+.player-bar.compact .more-popover {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 10px);
+  min-width: 168px;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  z-index: 40;
+  box-shadow: var(--shadow);
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+}
+
+.player-bar.compact .more-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  border: none;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.player-bar.compact .more-item:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--accent);
+}
+
+.player-bar.compact .more-item.active {
+  color: var(--accent);
+  background: var(--accent-muted);
+}
+
+.player-bar.compact .more-item:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 
 .player-bar.compact .ctrl-queue {
