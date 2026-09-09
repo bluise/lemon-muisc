@@ -1,43 +1,45 @@
 <template>
-  <div
-    v-if="open"
-    class="modal-overlay confirm-overlay"
-    @click.self="!busy && onCancel()"
-    @keydown.esc.prevent="!busy && onCancel()"
-  >
-    <div class="confirm-modal card" role="dialog" :aria-labelledby="titleId" aria-modal="true">
-      <div class="confirm-body" :class="{ 'no-cover': !cover }">
-        <div v-if="cover" class="confirm-cover-wrap">
-          <CoverArt :src="cover" />
+  <Teleport to="body">
+    <div
+      v-if="open"
+      class="modal-overlay confirm-overlay"
+      @click.self="!busy && onCancel()"
+      @keydown.esc.prevent="!busy && onCancel()"
+    >
+      <div class="confirm-modal card" role="dialog" :aria-labelledby="titleId" aria-modal="true">
+        <div class="confirm-body" :class="{ 'no-cover': !cover }">
+          <div v-if="cover" class="confirm-cover-wrap">
+            <CoverArt :src="cover" />
+          </div>
+          <div class="confirm-main">
+            <h3 :id="titleId">{{ title }}</h3>
+            <p v-if="message" class="confirm-text">{{ message }}</p>
+            <p v-if="hint" class="confirm-hint">{{ hint }}</p>
+          </div>
         </div>
-        <div class="confirm-main">
-          <h3 :id="titleId">{{ title }}</h3>
-          <p v-if="message" class="confirm-text">{{ message }}</p>
-          <p v-if="hint" class="confirm-hint">{{ hint }}</p>
+        <div class="confirm-actions">
+          <button
+            v-if="mode !== 'alert'"
+            type="button"
+            class="btn-ghost btn-sm"
+            :disabled="busy"
+            @click="onCancel()"
+          >
+            {{ cancelText }}
+          </button>
+          <button
+            type="button"
+            class="btn-sm"
+            :class="danger ? 'btn-danger' : 'btn-primary'"
+            :disabled="busy"
+            @click="onConfirm()"
+          >
+            {{ busy ? busyText : confirmText }}
+          </button>
         </div>
-      </div>
-      <div class="confirm-actions">
-        <button
-          v-if="mode !== 'alert'"
-          type="button"
-          class="btn-ghost btn-sm"
-          :disabled="busy"
-          @click="onCancel()"
-        >
-          {{ cancelText }}
-        </button>
-        <button
-          type="button"
-          class="btn-sm"
-          :class="danger ? 'btn-danger' : 'btn-primary'"
-          :disabled="busy"
-          @click="onConfirm()"
-        >
-          {{ busy ? busyText : confirmText }}
-        </button>
       </div>
     </div>
-  </div>
+  </Teleport>
 </template>
 
 <script setup>
@@ -74,7 +76,8 @@ function onCancel() {
 .confirm-overlay {
   position: fixed;
   inset: 0;
-  z-index: 1300;
+  /* 高于页面内弹层（如查重 ~1200）与标签编辑浮层（~11000） */
+  z-index: 12000;
   background: rgba(0, 0, 0, 0.55);
   display: flex;
   align-items: center;
