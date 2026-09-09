@@ -208,7 +208,7 @@ async function submit() {
 
 <style scoped>
 .modal-overlay {
-  position: fixed; inset: 0; z-index: 1200;
+  position: fixed; inset: 0; z-index: 11100;
   background: rgba(0,0,0,0.55);
   display: flex; align-items: center; justify-content: center; padding: 20px;
 }

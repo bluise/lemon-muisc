@@ -26,68 +26,65 @@
       </form>
       <div class="source-tabs">
         <button
-          v-for="(info, key) in discoverState.sources" :key="key"
+          v-for="(info, key) in discoverState.sources"
+          :key="key"
+          type="button"
           :class="['tab', { active: discoverState.activeSource === key }]"
           @click="switchSource(key)"
         >{{ platformLabel(key, info) }}</button>
       </div>
-      <div v-if="showRecommend" class="sort-tabs">
-        <button
-          v-for="opt in recommendSortOptions" :key="opt.id"
-          :class="['sort-tab', { active: discoverState.recommendSort === opt.id }]"
-          @click="changeRecommendSort(opt.id)"
-        >{{ opt.label }}</button>
-      </div>
     </div>
 
-    <div v-if="showRecommend" class="recommend-section">
-      <div v-if="discoverState.recommendLoading && !discoverState.recommendList.length" class="recommend-loading">
-        正在加载推荐歌单...
-      </div>
-      <template v-else>
-        <div v-if="discoverState.recommendList.length" class="recommend-grid">
-          <button
-            v-for="item in discoverState.recommendList" :key="`${item.source}-${item.id}`"
-            class="recommend-card"
-            @click="openRecommendPlaylist(item)"
-          >
-            <div class="recommend-cover-wrap">
-              <CoverArt :src="item.img" />
-            </div>
-            <div class="recommend-meta">
-              <div class="recommend-name" :title="cleanText(item.name)">{{ cleanText(item.name) }}</div>
-              <div class="recommend-author" :title="cleanText(item.author)">{{ cleanText(item.author) || '未知作者' }}</div>
-              <div class="recommend-stats">
-                <span v-if="item.total"><svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>{{ item.total }}</span>
-                <span v-if="item.play_count"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3z"/><path d="M3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/></svg>{{ item.play_count }}</span>
-              </div>
-            </div>
-          </button>
-        </div>
-        <div v-else class="empty">暂无推荐歌单</div>
-        <div v-if="discoverState.recommendList.length" class="recommend-footer">
-          <span v-if="discoverState.recommendTotal" class="recommend-count">
-            已显示 {{ discoverState.recommendList.length }}
-            <template v-if="discoverState.recommendTotal > discoverState.recommendList.length">
-              / {{ discoverState.recommendTotal }}
-            </template>
-            个歌单
-          </span>
-          <button
-            v-if="discoverState.recommendHasMore"
-            type="button"
-            class="btn-ghost recommend-more-btn"
-            :disabled="discoverState.recommendLoadingMore"
-            @click="loadMoreRecommend"
-          >
-            {{ discoverState.recommendLoadingMore ? '加载中...' : '加载更多歌单' }}
-          </button>
-        </div>
-      </template>
+    <div v-if="showRecommend" class="home-feed">
+      <DiscoverPlaylistSection
+        :list="discoverState.recommendList"
+        :loading="discoverState.recommendLoading"
+        :error="discoverState.playlistsError"
+        :sort="discoverState.recommendSort"
+        :sort-options="recommendSortOptions"
+        :has-more="discoverState.recommendHasMore"
+        @update:sort="changeRecommendSort"
+        @open="openRecommendPlaylist"
+        @more="goPlaylistsMore"
+        @need-more="loadRecommendMore"
+      />
+      <DiscoverNewSongsSection
+        :list="discoverState.newSongs"
+        :loading="discoverState.newSongsLoading"
+        :error="discoverState.newSongsError"
+        :unsupported="discoverState.newSongsUnsupported"
+        :region="discoverState.songRegion"
+        :regions="discoverState.newSongsRegions"
+        :is-playing="(item) => isPlayingItem(item)"
+        :is-paused="isPaused"
+        @update:region="changeSongRegion"
+        @play="playHomeSong"
+        @play-all="playHomeSongs"
+        @more="goNewSongsMore"
+      />
+      <DiscoverNewAlbumsSection
+        :list="discoverState.newAlbums"
+        :loading="discoverState.newAlbumsLoading"
+        :error="discoverState.newAlbumsError"
+        :unsupported="discoverState.newAlbumsUnsupported"
+        :region="discoverState.albumRegion"
+        :regions="discoverState.newAlbumsRegions"
+        @update:region="changeAlbumRegion"
+        @open="openHomeAlbum"
+        @more="goNewAlbumsMore"
+      />
+      <DiscoverRanksSection
+        :list="discoverState.ranks"
+        :loading="discoverState.ranksLoading"
+        :error="discoverState.ranksError"
+        :unsupported="discoverState.ranksUnsupported"
+        @open="openHomeRank"
+        @more="goRanksMore"
+      />
     </div>
 
-    <div v-if="discoverState.viewMode === 'detail' && discoverState.playlistInfo" class="detail-toolbar">
-      <button class="btn-ghost btn-sm" @click="backToRecommend">← 返回推荐歌单</button>
+    <div v-if="discoverState.viewMode === 'detail'" class="detail-toolbar">
+      <button class="btn-ghost btn-sm" @click="backToRecommend">← 返回发现</button>
     </div>
 
     <div v-if="discoverState.viewMode === 'detail' && discoverState.playlistInfo" class="playlist-info card">
@@ -168,59 +165,54 @@
           <button class="btn-primary btn-sm" @click="playAll">播放全部</button>
         </div>
       </div>
-      <div class="result-header">
-        <span class="col-check">
-          <input type="checkbox" :checked="allSelected" :indeterminate.prop="someSelected && !allSelected" @change="toggleSelectAll" title="全选" />
-        </span>
-        <span class="col-index">#</span>
-        <span class="col-name">歌曲</span>
-        <span class="col-singer">歌手</span>
-        <span class="col-album">专辑</span>
-        <span class="col-duration">时长</span>
-        <span class="col-play">试听</span>
-        <span class="col-queue">列表</span>
-        <span class="col-action">操作</span>
+      <div class="result-header song-list-header">
+        <label class="header-select-all">
+          <input type="checkbox" :checked="allSelected" :indeterminate.prop="someSelected && !allSelected" @change="toggleSelectAll" />
+          全选本页
+        </label>
       </div>
       <div
         ref="trackListContainerRef"
-        class="result-list-body"
-        :class="{ 'is-virtual': trackListUseVirtual }"
+        class="result-list-body song-list-body"
         @scroll="onTrackListScroll"
       >
-        <div
-          class="result-list-spacer"
-          :style="{ paddingTop: `${trackListPaddingTop}px`, paddingBottom: `${trackListPaddingBottom}px` }"
-        >
-      <TrackResultRow
-        v-for="{ item, i } in displayRows" :key="trackSelectKey(item, i)"
-        :item="item"
-        :index="i"
-        :selected="isSelected(item, i)"
-        :playing="isPlayingItem(item)"
-        :paused="isPaused"
-        :loading="loadingPlay === item.id"
-        :in-queue="isInQueue(item, activeSource)"
-        :show-playlist-pick="Boolean(playlistPickTarget)"
-        :quality-menu-open="qualityMenuId === trackSelectKey(item, i)"
-        :menu-style="menuStyle"
-        @toggle-select="toggleSelect(item, i)"
-        @toggle-play="togglePlay(item)"
-        @add-queue="addOneToQueue(item)"
-        @add-playlist="addToPlaylist(item)"
-        @toggle-quality-menu="toggleQualityMenu(item, i, $event)"
-        @download="downloadOne(item, $event)"
-      />
+        <div class="playlist-song-grid">
+          <DiscoverSongItem
+            v-for="{ item, i } in displayRows" :key="trackSelectKey(item, i)"
+            :item="item"
+            :index="i + 1"
+            :selectable="true"
+            :selected="isSelected(item, i)"
+            :playing="isPlayingItem(item)"
+            :paused="isPaused"
+            :loading="loadingPlay === item.id"
+            :show-album="true"
+            :eager-cover="i < 60"
+            @toggle-select="toggleSelect(item, i)"
+            @play="togglePlay(item)"
+          >
+            <template #actions>
+              <DiscoverSongActions
+                :item="item"
+                :source="item.source || activeSource"
+                @toast="({ text, type }) => showToast(text, type)"
+              />
+            </template>
+          </DiscoverSongItem>
         </div>
-      </div>
-
-      <div class="pagination" v-if="showPagination">
-        <button class="btn-ghost btn-sm" :disabled="playlistTrackPage <= 1" @click="playlistTrackPage--">上一页</button>
-        <span class="page-info">{{ playlistTrackPage }} / {{ playlistTrackTotalPages }}</span>
-        <button class="btn-ghost btn-sm" :disabled="playlistTrackPage >= playlistTrackTotalPages" @click="playlistTrackPage++">下一页</button>
       </div>
     </div>
 
-    <div v-else-if="discoverState.viewMode === 'detail' && discoverState.fetched && !discoverState.loading" class="empty">暂无歌曲，请检查歌单链接是否正确</div>
+    <div class="pager" v-if="discoverState.viewMode === 'detail' && showPagination">
+      <button class="btn-ghost btn-sm" :disabled="playlistTrackPage <= 1" @click="playlistTrackPage--">上一页</button>
+      <span class="page-info">第 {{ playlistTrackPage }} / {{ playlistTrackTotalPages }} 页</span>
+      <button class="btn-ghost btn-sm" :disabled="playlistTrackPage >= playlistTrackTotalPages" @click="playlistTrackPage++">下一页</button>
+    </div>
+
+    <div
+      v-if="discoverState.viewMode === 'detail' && discoverState.fetched && !discoverState.loading && !discoverState.results.length"
+      class="empty"
+    >暂无歌曲，请检查歌单链接是否正确</div>
 
     <div v-if="toast" class="toast" :class="toast.type">{{ toast.text }}</div>
 
@@ -249,36 +241,48 @@
 
 <script setup>
 defineOptions({ name: 'Discover' })
-import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, computed, onMounted, onActivated, onUnmounted, watch, nextTick } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import BatchQualityDialog from '../components/BatchQualityDialog.vue'
 import ConfirmModal from '../components/ConfirmModal.vue'
 import CoverArt from '../components/CoverArt.vue'
-import TrackResultRow from '../components/TrackResultRow.vue'
+import DiscoverSongItem from '../components/discover/DiscoverSongItem.vue'
+import DiscoverSongActions from '../components/discover/DiscoverSongActions.vue'
+import DiscoverPlaylistSection from '../components/discover/DiscoverPlaylistSection.vue'
+import DiscoverNewSongsSection from '../components/discover/DiscoverNewSongsSection.vue'
+import DiscoverNewAlbumsSection from '../components/discover/DiscoverNewAlbumsSection.vue'
+import DiscoverRanksSection from '../components/discover/DiscoverRanksSection.vue'
 import { useBatchDownload, formatBatchDownloadToast } from '../composables/useBatchDownload.js'
 import { useTrackListView } from '../composables/useTrackListView.js'
+import { useProgressiveTrackCovers } from '../composables/useProgressiveTrackCovers.js'
 import { api } from '../api.js'
-import { assertActiveSourceForDownload } from '../stores/downloadGuard.js'
-import { discoverState, loadDiscoverSources, reloadDiscoverSources, sourcePlaceholders, recommendSortOptions } from '../stores/discover.js'
+import {
+  discoverState,
+  loadDiscoverSources,
+  reloadDiscoverSources,
+  sourcePlaceholders,
+  recommendSortOptions,
+  resetDiscoverHomeFeed,
+  defaultSongRegion,
+  defaultAlbumRegion,
+} from '../stores/discover.js'
 import { loadingPlay, isPaused, isPlayingItem, playItem, addToQueue, isInQueue } from '../stores/player.js'
 import { getQualityLabel } from '../utils/quality.js'
 import { platformLabel } from '../utils/platforms.js'
 import { cleanText, cleanTrackItem } from '../utils/text.js'
 import {
   trackSelectKey,
-  buildDownloadTask,
 } from '../utils/musicPayload.js'
 import { useQualityMenuPosition } from '../utils/qualityMenu.js'
-import { playlistPickTarget, addToPickingPlaylist, importPlaylistFromLoaded } from '../stores/library.js'
+import { playlistPickTarget, importPlaylistFromLoaded } from '../stores/library.js'
 
 const router = useRouter()
+const route = useRoute()
 const toast = ref(null)
 const importingPlaylist = ref(false)
 const importConfirm = ref(null)
-const qualityMenuId = ref(null)
 const showBatchQualityMenu = ref(false)
 const selectedKeys = ref(new Set())
-const { menuStyle, positionMenu, clearMenuPosition } = useQualityMenuPosition()
 const { menuStyle: batchMenuStyle, positionMenu: positionBatchMenu, clearMenuPosition: clearBatchMenuPosition } = useQualityMenuPosition()
 
 const {
@@ -348,14 +352,19 @@ const {
   totalPages: playlistTrackTotalPages,
   displayRows,
   containerRef: trackListContainerRef,
-  useVirtual: trackListUseVirtual,
-  paddingTop: trackListPaddingTop,
-  paddingBottom: trackListPaddingBottom,
   onScroll: onTrackListScroll,
   resetView: resetPlaylistTrackPage,
   showPagination,
   measureViewport,
-} = useTrackListView(() => discoverState.results)
+} = useTrackListView(() => discoverState.results, {
+  enableVirtual: false,
+  pageSize: 50,
+})
+
+useProgressiveTrackCovers(() => displayRows.value, {
+  getSource: () => activeSource.value,
+  enabled: () => discoverState.viewMode === 'detail',
+})
 
 function getSelectedEntries() {
   return discoverState.results
@@ -366,6 +375,7 @@ function getSelectedEntries() {
 let discoverSeq = 0
 let playlistFetchAbort = null
 let recommendAbort = null
+let homeFeedAbort = null
 
 function cancelPlaylistFetch() {
   playlistFetchAbort?.abort()
@@ -377,26 +387,77 @@ function cancelRecommendFetch() {
   recommendAbort = null
 }
 
+function cancelHomeFeed() {
+  homeFeedAbort?.abort()
+  homeFeedAbort = null
+}
+
 function isAbortedError(e) {
   return e?.aborted || e?.name === 'AbortError' || e?.message === '请求已取消'
 }
 
-onMounted(async () => {
-  await loadDiscoverSources(api)
-  loadRecommend()
+let bootPromise = null
+
+onMounted(() => {
+  bootPromise = (async () => {
+    await loadDiscoverSources(api)
+    if (!discoverState.songRegion) discoverState.songRegion = defaultSongRegion(discoverState.activeSource)
+    if (!discoverState.albumRegion) discoverState.albumRegion = defaultAlbumRegion(discoverState.activeSource)
+
+    const q = route.query
+    if (q.source && discoverState.sources[q.source]) {
+      discoverState.activeSource = String(q.source)
+    }
+    // keep-alive：深链在 onActivated 处理；首次无深链时再拉首页
+    if (!q.openPlaylist && !q.openAlbum) {
+      loadHomeFeed()
+    }
+  })()
   document.addEventListener('click', closeMenus)
+})
+
+/** Discover 被 keep-alive 缓存，从更多页带回 openAlbum/openPlaylist 时只会触发 activated */
+async function handleDiscoverDeepLink() {
+  if (bootPromise) await bootPromise
+  const q = route.query
+  if (!q.openPlaylist && !q.openAlbum) return
+
+  if (q.source && discoverState.sources[q.source]) {
+    discoverState.activeSource = String(q.source)
+  }
+
+  const openPlaylist = q.openPlaylist ? String(q.openPlaylist) : ''
+  const openAlbum = q.openAlbum
+    ? {
+        id: String(q.openAlbum),
+        source: String(q.source || discoverState.activeSource),
+        name: String(q.albumName || ''),
+        artist: String(q.albumArtist || ''),
+        img: String(q.albumImg || ''),
+      }
+    : null
+
+  // 先清 query，避免 onMounted+onActivated 或重复激活时二次打开
+  await router.replace({ path: '/discover' })
+
+  if (openPlaylist) {
+    discoverState.url = openPlaylist
+    await fetchPlaylist()
+  } else if (openAlbum) {
+    await openHomeAlbum(openAlbum)
+  }
+}
+
+onActivated(() => {
+  handleDiscoverDeepLink()
 })
 
 watch(() => discoverState.results.length, () => {
   nextTick(() => measureViewport())
 })
 
-watch(() => discoverState.activeSource, () => {
-  if (discoverState.viewMode === 'recommend') loadRecommend()
-})
-
 function switchSource(key) {
-  if (discoverState.activeSource === key) return
+  if (!key || discoverState.activeSource === key) return
   discoverState.activeSource = key
   discoverState.url = ''
   discoverState.viewMode = 'recommend'
@@ -404,22 +465,45 @@ function switchSource(key) {
   discoverState.results = []
   discoverState.playlistInfo = null
   discoverState.recommendPage = 1
+  discoverState.songRegion = defaultSongRegion(key)
+  discoverState.albumRegion = defaultAlbumRegion(key)
+  resetDiscoverHomeFeed()
   clearSelection()
   closeMenus()
-  loadRecommend()
+  loadHomeFeed()
 }
 
 function changeRecommendSort(sort) {
   if (discoverState.recommendSort === sort) return
   discoverState.recommendSort = sort
   discoverState.recommendPage = 1
+  discoverState.recommendList = []
+  discoverState.recommendHasMore = false
+  discoverState.recommendLoading = true
   loadRecommend()
+}
+
+function changeSongRegion(region) {
+  if (discoverState.songRegion === region) return
+  discoverState.songRegion = region
+  discoverState.newSongs = []
+  discoverState.newSongsLoading = true
+  loadNewSongs()
+}
+
+function changeAlbumRegion(region) {
+  if (discoverState.albumRegion === region) return
+  discoverState.albumRegion = region
+  discoverState.newAlbums = []
+  discoverState.newAlbumsLoading = true
+  loadNewAlbums()
 }
 
 function applyRecommendPage(data, { append = false } = {}) {
   const list = data?.list || []
   const total = Number(data?.total) || 0
   const limit = Number(data?.limit) || list.length || 30
+  const page = Number(data?.page) || discoverState.recommendPage || 1
 
   if (append) {
     const seen = new Set(discoverState.recommendList.map((item) => `${item.source}:${item.id}`))
@@ -434,7 +518,9 @@ function applyRecommendPage(data, { append = false } = {}) {
   }
 
   const loaded = discoverState.recommendList.length
-  if (!list.length) {
+  if (typeof data?.hasMore === 'boolean') {
+    discoverState.recommendHasMore = data.hasMore
+  } else if (!list.length) {
     discoverState.recommendHasMore = false
   } else if (total > loaded) {
     discoverState.recommendHasMore = true
@@ -442,14 +528,32 @@ function applyRecommendPage(data, { append = false } = {}) {
     discoverState.recommendHasMore = list.length >= limit
   }
   discoverState.recommendTotal = total > loaded ? total : loaded
+  if (!append) discoverState.recommendPage = page
 }
 
-async function loadRecommend(retrying = false) {
+function loadHomeFeed() {
+  if (!discoverState.activeSource) return
+  cancelHomeFeed()
+  const controller = new AbortController()
+  homeFeedAbort = controller
+  // 无数据时先亮骨架，避免短暂空白
+  if (!discoverState.recommendList.length) discoverState.recommendLoading = true
+  if (!discoverState.newSongs.length) discoverState.newSongsLoading = true
+  if (!discoverState.newAlbums.length) discoverState.newAlbumsLoading = true
+  if (!discoverState.ranks.length) discoverState.ranksLoading = true
+  loadRecommend({ signal: controller.signal })
+  loadNewSongs({ signal: controller.signal })
+  loadNewAlbums({ signal: controller.signal })
+  loadRanks({ signal: controller.signal })
+}
+
+async function loadRecommend(opts = {}) {
   if (!discoverState.activeSource) return
 
   cancelRecommendFetch()
-  const controller = new AbortController()
-  recommendAbort = controller
+  const controller = opts.signal ? null : new AbortController()
+  if (controller) recommendAbort = controller
+  const signal = opts.signal || controller.signal
   const seq = ++discoverSeq
   const source = discoverState.activeSource
   const sort = discoverState.recommendSort
@@ -457,8 +561,9 @@ async function loadRecommend(retrying = false) {
   discoverState.recommendPage = 1
   discoverState.recommendLoading = true
   discoverState.recommendHasMore = false
+  discoverState.playlistsError = ''
   try {
-    const res = await api.playlist.recommend(source, sort, 1, { signal: controller.signal })
+    const res = await api.playlist.recommend(source, sort, 1, 30, { signal })
     if (seq !== discoverSeq || source !== discoverState.activeSource) return
     applyRecommendPage(res.data, { append: false })
   } catch (e) {
@@ -467,53 +572,223 @@ async function loadRecommend(retrying = false) {
     discoverState.recommendList = []
     discoverState.recommendHasMore = false
     discoverState.recommendTotal = 0
-    if (!retrying && /不支持的平台/.test(e.message)) {
+    discoverState.playlistsError = e.message || '获取歌单失败'
+    if (/不支持的平台/.test(e.message || '')) {
       const prev = discoverState.activeSource
       await reloadDiscoverSources(api)
       if (discoverState.activeSource !== prev && discoverState.activeSource) {
         discoverState.recommendLoading = false
-        return loadRecommend(true)
+        return loadHomeFeed()
       }
     }
-    showToast(e.message, 'error')
   } finally {
-    if (recommendAbort === controller) recommendAbort = null
+    if (controller && recommendAbort === controller) recommendAbort = null
     if (seq === discoverSeq) discoverState.recommendLoading = false
   }
 }
 
-async function loadMoreRecommend() {
-  if (!discoverState.activeSource || !discoverState.recommendHasMore || discoverState.recommendLoadingMore) return
-
-  cancelRecommendFetch()
-  const controller = new AbortController()
-  recommendAbort = controller
-  const seq = ++discoverSeq
+let recommendMoreBusy = false
+async function loadRecommendMore() {
+  if (!discoverState.activeSource || !discoverState.recommendHasMore || recommendMoreBusy) return
+  if (discoverState.recommendLoading) return
+  recommendMoreBusy = true
   const source = discoverState.activeSource
   const sort = discoverState.recommendSort
-  const nextPage = discoverState.recommendPage + 1
-
-  discoverState.recommendLoadingMore = true
+  const nextPage = (discoverState.recommendPage || 1) + 1
   try {
-    const res = await api.playlist.recommend(source, sort, nextPage, { signal: controller.signal })
-    if (seq !== discoverSeq || source !== discoverState.activeSource) return
-    const before = discoverState.recommendList.length
+    const res = await api.playlist.recommend(source, sort, nextPage, 30)
+    if (source !== discoverState.activeSource || sort !== discoverState.recommendSort) return
     discoverState.recommendPage = nextPage
     applyRecommendPage(res.data, { append: true })
-    if (discoverState.recommendList.length === before) {
-      discoverState.recommendHasMore = false
-    }
-  } catch (e) {
-    if (isAbortedError(e)) return
-    if (seq !== discoverSeq) return
-    showToast(e.message, 'error')
+  } catch {
+    // 预取失败不打断当前页浏览
   } finally {
-    if (recommendAbort === controller) recommendAbort = null
-    if (seq === discoverSeq) discoverState.recommendLoadingMore = false
+    recommendMoreBusy = false
   }
 }
 
+async function loadNewSongs(opts = {}) {
+  if (!discoverState.activeSource) return
+  const source = discoverState.activeSource
+  const region = discoverState.songRegion || defaultSongRegion(source)
+  discoverState.newSongsLoading = true
+  discoverState.newSongsError = ''
+  discoverState.newSongsUnsupported = false
+  try {
+    const res = await api.discover.newSongs(source, region, 1, 54, { signal: opts.signal })
+    if (source !== discoverState.activeSource) return
+    const data = res.data || {}
+    discoverState.newSongs = data.list || []
+    discoverState.newSongsRegions = data.regions || []
+    discoverState.newSongsUnsupported = Boolean(data.unsupported)
+    if (data.region != null && data.region !== '') discoverState.songRegion = String(data.region)
+  } catch (e) {
+    if (isAbortedError(e)) return
+    if (source !== discoverState.activeSource) return
+    discoverState.newSongs = []
+    discoverState.newSongsError = e.message || '获取新歌失败'
+  } finally {
+    if (source === discoverState.activeSource) discoverState.newSongsLoading = false
+  }
+}
+
+async function loadNewAlbums(opts = {}) {
+  if (!discoverState.activeSource) return
+  const source = discoverState.activeSource
+  const region = discoverState.albumRegion || defaultAlbumRegion(source)
+  discoverState.newAlbumsLoading = true
+  discoverState.newAlbumsError = ''
+  discoverState.newAlbumsUnsupported = false
+  try {
+    const res = await api.discover.newAlbums(source, region, 1, 30, { signal: opts.signal })
+    if (source !== discoverState.activeSource) return
+    const data = res.data || {}
+    discoverState.newAlbums = data.list || []
+    discoverState.newAlbumsRegions = data.regions || []
+    discoverState.newAlbumsUnsupported = Boolean(data.unsupported)
+    if (data.region != null && data.region !== '') discoverState.albumRegion = String(data.region)
+  } catch (e) {
+    if (isAbortedError(e)) return
+    if (source !== discoverState.activeSource) return
+    discoverState.newAlbums = []
+    discoverState.newAlbumsError = e.message || '获取新碟失败'
+  } finally {
+    if (source === discoverState.activeSource) discoverState.newAlbumsLoading = false
+  }
+}
+
+async function loadRanks(opts = {}) {
+  if (!discoverState.activeSource) return
+  const source = discoverState.activeSource
+  discoverState.ranksLoading = true
+  discoverState.ranksError = ''
+  discoverState.ranksUnsupported = false
+  try {
+    const res = await api.discover.toplists(source, { signal: opts.signal })
+    if (source !== discoverState.activeSource) return
+    const data = res.data || {}
+    discoverState.ranks = (data.list || []).map((item) => ({
+      ...item,
+      songs: (item.songs || []).filter((s) => s?.name || s?.singer || s?.author).slice(0, 3),
+    }))
+    discoverState.ranksUnsupported = Boolean(data.unsupported)
+  } catch (e) {
+    if (isAbortedError(e)) return
+    if (source !== discoverState.activeSource) return
+    discoverState.ranks = []
+    discoverState.ranksError = e.message || '获取排行榜失败'
+  } finally {
+    if (source === discoverState.activeSource) discoverState.ranksLoading = false
+  }
+}
+
+function goPlaylistsMore() {
+  router.push({
+    path: '/discover/playlists',
+    query: { source: discoverState.activeSource, sort: discoverState.recommendSort },
+  })
+}
+
+function goNewSongsMore() {
+  router.push({
+    path: '/discover/new-songs',
+    query: { source: discoverState.activeSource, region: discoverState.songRegion || undefined },
+  })
+}
+
+function goNewAlbumsMore() {
+  router.push({
+    path: '/discover/new-albums',
+    query: { source: discoverState.activeSource, region: discoverState.albumRegion || undefined },
+  })
+}
+
+function goRanksMore() {
+  router.push({
+    path: '/discover/ranks',
+    query: { source: discoverState.activeSource },
+  })
+}
+
+async function playHomeSong(item) {
+  try {
+    await playItem(item, item.source || activeSource.value)
+  } catch (e) {
+    showToast(e.message || '试听失败', 'error')
+  }
+}
+
+async function playHomeSongs(items) {
+  const list = Array.isArray(items) ? items : []
+  if (!list.length) return
+  const source = list[0].source || activeSource.value
+  for (const item of list) addToQueue(item, item.source || source)
+  try {
+    await playItem(list[0], source)
+    showToast(`开始播放，共 ${list.length} 首`, 'success')
+  } catch (e) {
+    showToast(e.message || '播放失败', 'error')
+  }
+}
+
+async function openHomeAlbum(item) {
+  if (!item?.id) return
+  const source = item.source || activeSource.value
+  cancelPlaylistFetch()
+  const controller = new AbortController()
+  playlistFetchAbort = controller
+  discoverState.loading = true
+  discoverState.loadingMore = false
+  discoverState.viewMode = 'detail'
+  discoverState.results = []
+  discoverState.playlistInfo = {
+    name: item.name,
+    author: item.artist,
+    img: item.img,
+    desc: '',
+  }
+  discoverState.total = 0
+  clearSelection()
+  try {
+    const res = await api.search.fetchAlbum(source, item.id, { signal: controller.signal })
+    const data = res.data || res
+    const list = (data.list || data.songs || []).map((t) => cleanTrackItem({ ...t, source: t.source || source }))
+    discoverState.results = list
+    discoverState.total = Number(data.total) || list.length
+    discoverState.playlistInfo = {
+      name: data.info?.name || data.name || item.name,
+      author: data.info?.artist || data.artist || item.artist,
+      img: data.info?.img || data.img || item.img,
+      desc: data.info?.desc || '',
+      play_count: '',
+    }
+    discoverState.fetched = true
+    resetPlaylistTrackPage()
+  } catch (e) {
+    if (isAbortedError(e)) return
+    showToast(e.message || '获取专辑失败', 'error')
+    backToRecommend()
+  } finally {
+    if (playlistFetchAbort === controller) playlistFetchAbort = null
+    discoverState.loading = false
+  }
+}
+
+function openHomeRank(item) {
+  if (!item?.id) return
+  router.push({
+    path: '/discover/ranks',
+    query: {
+      source: item.source || discoverState.activeSource,
+      id: String(item.id),
+    },
+  })
+}
+
 function backToRecommend() {
+  cancelPlaylistFetch()
+  discoverState.loading = false
+  discoverState.loadingMore = false
   discoverState.viewMode = 'recommend'
   discoverState.fetched = false
   discoverState.results = []
@@ -540,6 +815,7 @@ onUnmounted(() => {
   document.removeEventListener('click', closeMenus)
   cancelPlaylistFetch()
   cancelRecommendFetch()
+  cancelHomeFeed()
 })
 
 function isSelected(item, i) {
@@ -566,23 +842,8 @@ function clearSelection() {
   selectedKeys.value = new Set()
 }
 
-function toggleQualityMenu(item, i, event) {
-  showBatchQualityMenu.value = false
-  clearBatchMenuPosition()
-  const key = trackSelectKey(item, i)
-  if (qualityMenuId.value === key) {
-    qualityMenuId.value = null
-    clearMenuPosition()
-    return
-  }
-  qualityMenuId.value = key
-  positionMenu(event?.currentTarget, { align: 'right' })
-}
-
 function toggleBatchQualityMenu(event) {
   if (!selectedCount.value) return
-  qualityMenuId.value = null
-  clearMenuPosition()
   showBatchQualityMenu.value = !showBatchQualityMenu.value
   if (showBatchQualityMenu.value) {
     positionBatchMenu(event?.currentTarget, { align: 'left' })
@@ -592,9 +853,7 @@ function toggleBatchQualityMenu(event) {
 }
 
 function closeMenus() {
-  qualityMenuId.value = null
   showBatchQualityMenu.value = false
-  clearMenuPosition()
   clearBatchMenuPosition()
 }
 
@@ -766,17 +1025,6 @@ async function fetchPlaylist() {
   }
 }
 
-async function downloadOne(item, quality) {
-  closeMenus()
-  if (!(await assertActiveSourceForDownload())) return
-  try {
-    await api.download.add([buildDownloadTask(item, activeSource.value, quality)])
-    showToast(`已添加下载: ${item.name} (${getQualityLabel(quality, item.types)})`, 'success')
-  } catch (e) {
-    showToast(e.message, 'error')
-  }
-}
-
 async function downloadSelected(quality) {
   const entries = getSelectedEntries()
   if (!entries.length) return
@@ -786,13 +1034,6 @@ async function downloadSelected(quality) {
 
 async function handleBatchConfirm(payload) {
   await confirmBatchDialog(payload)
-}
-
-function addToPlaylist(item) {
-  const res = addToPickingPlaylist(item, activeSource.value)
-  if (res.ok) showToast(`已加入歌单：${playlistPickTarget.value?.name || ''}`, 'success')
-  else if (res.duplicate) showToast('该歌曲已在歌单中', 'info')
-  else showToast('请先打开歌单并点击添加歌曲', 'info')
 }
 
 function showToast(text, type = 'info') {
@@ -815,10 +1056,6 @@ function showToast(text, type = 'info') {
   background: rgba(99, 102, 241, 0.1);
   border: 1px solid rgba(99, 102, 241, 0.25);
 }
-.playlist-add-btn {
-  margin-right: 6px;
-  white-space: nowrap;
-}
 
 .discover-header { padding: 20px 20px 18px; margin-bottom: 16px; overflow: visible; }
 
@@ -826,7 +1063,7 @@ function showToast(text, type = 'info') {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin: 0 0 16px;
+  margin: 0 0 20px;
 }
 .discover-bar {
   flex: 1;
@@ -866,6 +1103,7 @@ function showToast(text, type = 'info') {
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
+  padding-top: 2px;
 }
 .tab {
   padding: 5px 14px;
@@ -900,6 +1138,10 @@ function showToast(text, type = 'info') {
   color: var(--accent);
   border-bottom-color: var(--accent);
   font-weight: 500;
+}
+
+.home-feed {
+  margin-bottom: 24px;
 }
 
 .recommend-section { margin-bottom: 16px; }
@@ -1127,17 +1369,55 @@ function showToast(text, type = 'info') {
 .results-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .batch-dl-wrap { display: inline-block; }
 
-/* 仅表头；曲目行样式在 TrackResultRow（父级 .result-row 会穿透到子根节点并覆盖移动端 grid） */
-.result-header {
-  display: grid;
-  grid-template-columns: 36px 48px minmax(180px, 2.2fr) minmax(120px, 1fr) minmax(120px, 1fr) 64px 44px 44px 44px;
+/* 歌单详情曲目：双列封面播放行 */
+.result-header.song-list-header {
+  display: flex;
   align-items: center;
   padding: 10px 16px;
-  gap: 8px;
   color: var(--text-muted);
   font-size: 12px;
   border-bottom: 1px solid var(--border-light);
   background: var(--bg-elevated);
+}
+.header-select-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+}
+.header-select-all input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.playlist-song-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px 12px;
+  padding: 8px 12px 12px;
+}
+.song-list-body :deep(.discover-song-item) {
+  padding-left: 8px;
+  padding-right: 8px;
+  border-radius: 10px;
+  border-bottom: none;
+}
+.song-list-body :deep(.discover-song-item:last-child) {
+  border-bottom: none;
+}
+@media (max-width: 960px) {
+  .song-list-body :deep(.song-time) { display: none; }
+}
+
+@media (max-width: 640px) {
+  .playlist-song-grid {
+    grid-template-columns: 1fr;
+    gap: 2px;
+    padding: 6px 8px 10px;
+  }
 }
 
 .col-check {
@@ -1151,65 +1431,7 @@ function showToast(text, type = 'info') {
   accent-color: var(--accent);
   cursor: pointer;
 }
-
-.col-name, .col-singer, .col-album {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 .col-name { font-weight: 500; }
-.col-singer, .col-album { color: var(--text-secondary); }
-.col-duration { color: var(--text-muted); text-align: center; }
-.col-index { color: var(--text-muted); text-align: center; }
-.col-play { text-align: center; }
-.col-queue { text-align: center; }
-.col-action { text-align: center; position: relative; overflow: visible; }
-
-.queue-add-btn {
-  width: 32px;
-  height: 32px;
-  border-radius: var(--radius);
-  background: transparent;
-  color: var(--text-muted);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  transition: all 0.2s;
-  border: 1px solid var(--border);
-}
-.queue-add-btn:hover { color: var(--accent); border-color: var(--accent); background: var(--accent-muted); }
-.queue-add-btn.added { color: var(--success); border-color: var(--success); background: rgba(52, 199, 89, 0.1); cursor: default; }
-
-.play-btn {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  background: transparent;
-  color: var(--text-muted);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  transition: all 0.2s;
-  border: 1px solid var(--border);
-}
-.play-btn:hover { color: var(--accent); border-color: var(--accent); background: var(--accent-muted); }
-
-.dl-btn {
-  width: 32px;
-  height: 32px;
-  border-radius: var(--radius);
-  background: transparent;
-  color: var(--text-muted);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  transition: all 0.2s;
-  border: 1px solid var(--border);
-}
-.dl-btn:hover { color: var(--success); border-color: var(--success); background: rgba(52, 199, 89, 0.12); }
 
 .dl-wrap { position: relative; display: inline-block; }
 .quality-menu {
@@ -1244,6 +1466,15 @@ function showToast(text, type = 'info') {
 .spin { animation: spin 1s linear infinite; }
 @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 
+.pager {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 12px;
+  margin-top: 20px;
+}
+.page-info { font-size: 13px; color: var(--text-muted); }
+
 .empty { text-align: center; padding: 60px 0; color: var(--text-muted); font-size: 14px; }
 
 .toast {
@@ -1265,7 +1496,7 @@ function showToast(text, type = 'info') {
 
 @media (max-width: 768px) {
   .discover-header { padding: 12px; }
-  .discover-row { gap: 8px; margin-bottom: 12px; }
+  .discover-row { gap: 8px; margin-bottom: 18px; }
   .discover-bar { height: 44px; padding: 0 12px; }
   .discover-input { font-size: 16px; }
   .discover-btn { height: 44px; min-width: 72px; padding: 0 14px; }
@@ -1282,7 +1513,6 @@ function showToast(text, type = 'info') {
   .playlist-tags { justify-content: center; }
 
   .result-header { display: none; }
-  /* 曲目行移动端布局见 TrackResultRow.vue（scoped 无法从此穿透） */
 
   .results-toolbar { flex-wrap: wrap; gap: 8px; }
   .mobile-select-all { display: inline-flex; }

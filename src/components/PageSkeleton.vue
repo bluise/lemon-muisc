@@ -36,6 +36,29 @@
       <div class="sk-block" />
     </template>
 
+    <template v-else-if="page === 'discover'">
+      <div class="sk-title" />
+      <div class="sk-subtitle" />
+      <div class="sk-card">
+        <div class="sk-row sk-search-bar" />
+        <div class="sk-tabs" />
+      </div>
+      <div class="sk-section-title" />
+      <div class="sk-discover-grid">
+        <div v-for="i in 10" :key="`p-${i}`" class="sk-discover-cover" />
+      </div>
+      <div class="sk-section-title" />
+      <div v-for="i in 4" :key="`s-${i}`" class="sk-list-row" />
+      <div class="sk-section-title" />
+      <div class="sk-discover-grid">
+        <div v-for="i in 5" :key="`a-${i}`" class="sk-discover-cover" />
+      </div>
+      <div class="sk-section-title" />
+      <div class="sk-h-scroll">
+        <div v-for="i in 4" :key="`r-${i}`" class="sk-card-h tall" />
+      </div>
+    </template>
+
     <template v-else>
       <div class="sk-title" />
       <div class="sk-subtitle" />
@@ -191,6 +214,41 @@ defineProps({
 .sk-grid-item {
   height: 168px;
   border-radius: 10px;
+}
+
+.sk-discover-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.sk-discover-cover {
+  aspect-ratio: 1;
+  border-radius: 10px;
+  background: linear-gradient(
+    90deg,
+    var(--bg-elevated) 0%,
+    color-mix(in srgb, var(--bg-elevated) 70%, var(--text-muted)) 50%,
+    var(--bg-elevated) 100%
+  );
+  background-size: 200% 100%;
+  animation: sk-shimmer 1.2s ease-in-out infinite;
+}
+
+.sk-card-h.tall {
+  height: 160px;
+  flex-basis: 140px;
+}
+
+@media (max-width: 960px) {
+  .sk-discover-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+@media (max-width: 720px) {
+  .sk-discover-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 480px) {
+  .sk-discover-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @keyframes sk-shimmer {

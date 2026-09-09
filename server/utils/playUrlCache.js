@@ -1,5 +1,5 @@
-/** 试听链接内存缓存（平台 CDN 链接通常有时效，默认 25 分钟） */
-const PLAY_URL_TTL_MS = 25 * 60 * 1000
+/** 试听链接内存缓存（平台 CDN 链接通常很快失效，不宜缓存太久） */
+const PLAY_URL_TTL_MS = 8 * 60 * 1000
 const MAX_ENTRIES = 120
 
 /** @type {Map<string, { url: string, expiresAt: number }>} */

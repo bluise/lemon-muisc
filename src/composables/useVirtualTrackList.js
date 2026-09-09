@@ -9,7 +9,11 @@ const OVERSCAN = 8
  * 大列表虚拟滚动：仅渲染可视区域附近的曲目行
  * @param {() => Array<{ item: object, i: number }>} getRows
  */
-export function useVirtualTrackList(getRows, { threshold = DEFAULT_THRESHOLD } = {}) {
+export function useVirtualTrackList(getRows, {
+  threshold = DEFAULT_THRESHOLD,
+  desktopRowHeight = DESKTOP_ROW_HEIGHT,
+  mobileRowHeight = MOBILE_ROW_HEIGHT,
+} = {}) {
   const containerRef = ref(null)
   const scrollTop = ref(0)
   const viewportHeight = ref(560)
@@ -18,7 +22,7 @@ export function useVirtualTrackList(getRows, { threshold = DEFAULT_THRESHOLD } =
   let narrowMq = null
   let onNarrowChange = null
 
-  const rowHeight = computed(() => (isNarrow.value ? MOBILE_ROW_HEIGHT : DESKTOP_ROW_HEIGHT))
+  const rowHeight = computed(() => (isNarrow.value ? mobileRowHeight : desktopRowHeight))
 
   const allRows = computed(() => getRows() || [])
   const useVirtual = computed(() => allRows.value.length > threshold)

@@ -6,11 +6,18 @@ const VIRTUAL_THRESHOLD = 60
 const PAGE_SIZE = 50
 
 /**
- * 曲目列表展示：小列表全量渲染；中等列表分页；大列表虚拟滚动
+ * 曲目列表展示：小列表全量渲染；中等列表分页；大列表可选虚拟滚动
  */
-export function useTrackListView(getTracks, { paginateWhen = () => true } = {}) {
+export function useTrackListView(getTracks, {
+  paginateWhen = () => true,
+  enableVirtual = true,
+  pageSize = PAGE_SIZE,
+  virtualThreshold = VIRTUAL_THRESHOLD,
+  desktopRowHeight,
+  mobileRowHeight,
+} = {}) {
   const trackCount = computed(() => getTracks().length)
-  const useVirtualMode = computed(() => trackCount.value > VIRTUAL_THRESHOLD)
+  const useVirtualMode = computed(() => enableVirtual && trackCount.value > virtualThreshold)
 
   const {
     page,
@@ -18,8 +25,8 @@ export function useTrackListView(getTracks, { paginateWhen = () => true } = {}) 
     displayRows: pagedRows,
     resetPage,
   } = usePagedTrackRows(getTracks, {
-    pageSize: PAGE_SIZE,
-    enabled: () => paginateWhen() && trackCount.value > PAGE_SIZE && !useVirtualMode.value,
+    pageSize,
+    enabled: () => paginateWhen() && trackCount.value > pageSize && !useVirtualMode.value,
   })
 
   const {
@@ -34,7 +41,11 @@ export function useTrackListView(getTracks, { paginateWhen = () => true } = {}) 
   } = useVirtualTrackList(() => {
     if (useVirtualMode.value) return getTracks().map((item, i) => ({ item, i }))
     return pagedRows.value
-  }, { threshold: VIRTUAL_THRESHOLD })
+  }, {
+    threshold: virtualThreshold,
+    ...(desktopRowHeight != null ? { desktopRowHeight } : {}),
+    ...(mobileRowHeight != null ? { mobileRowHeight } : {}),
+  })
 
   const displayRows = computed(() => (
     useVirtualMode.value ? visibleRows.value : pagedRows.value

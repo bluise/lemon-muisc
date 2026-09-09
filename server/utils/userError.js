@@ -90,7 +90,7 @@ const RULES = [
   },
   {
     test: /NotSupportedError|no supported sources/i,
-    message: '浏览器无法播放该音频，请尝试其他歌曲',
+    message: '播放链接失效或暂时无法解码，请再点一次播放',
   },
   {
     test: /104003/i,

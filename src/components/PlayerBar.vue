@@ -130,6 +130,41 @@
         <svg viewBox="0 0 24 24" width="16" height="16" :fill="isCurrentFavorite ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.6l-1-1a5.5 5.5 0 0 0-7.8 7.8l1 1L12 21l7.8-7.6 1-1a5.5 5.5 0 0 0 0-7.8z"/></svg>
       </button>
       <button
+        v-if="currentPlaying"
+        class="ctrl-btn ctrl-playlist desktop-extra"
+        type="button"
+        title="加入歌单"
+        @click="openPickCurrentPlaylist"
+      >
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15V6"/><path d="M18.5 18a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z"/><path d="M12 12H3"/><path d="M16 6H3"/><path d="M12 18H3"/></svg>
+      </button>
+      <div v-if="canDownloadCurrent" class="dl-wrap desktop-extra" data-player-dl>
+        <button
+          class="ctrl-btn ctrl-download"
+          type="button"
+          title="下载"
+          @click.stop="toggleDownloadMenu($event)"
+        >
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+          </svg>
+        </button>
+        <div v-if="downloadMenuOpen" class="quality-menu" :style="downloadMenuStyle" data-player-dl @click.stop>
+          <div class="quality-menu-title">选择音质</div>
+          <template v-if="currentQualities.length">
+            <button
+              v-for="q in currentQualities"
+              :key="q"
+              type="button"
+              class="quality-option"
+              @click="downloadCurrent(q)"
+            >{{ getQualityDisplay(q, currentPlaying?.types) }}</button>
+          </template>
+          <div v-else class="quality-empty">该曲暂无可用音质（音源未返回）</div>
+        </div>
+      </div>
+      <button
         v-if="currentLocalPath && !isMobilePlayer"
         class="ctrl-btn ctrl-tag"
         type="button"
@@ -189,6 +224,40 @@
             <svg viewBox="0 0 24 24" width="16" height="16" :fill="isCurrentFavorite ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.6l-1-1a5.5 5.5 0 0 0-7.8 7.8l1 1L12 21l7.8-7.6 1-1a5.5 5.5 0 0 0 0-7.8z"/></svg>
             <span>{{ isCurrentFavorite ? '取消收藏' : '收藏' }}</span>
           </button>
+          <button
+            type="button"
+            class="more-item"
+            :disabled="!currentPlaying"
+            @click="onMoreOpenPlaylist"
+          >
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15V6"/><path d="M18.5 18a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z"/><path d="M12 12H3"/><path d="M16 6H3"/><path d="M12 18H3"/></svg>
+            <span>加入歌单</span>
+          </button>
+          <button
+            v-if="canDownloadCurrent"
+            type="button"
+            class="more-item"
+            :class="{ active: showMoreDlQuality }"
+            @click="showMoreDlQuality = !showMoreDlQuality"
+          >
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+            <span>下载</span>
+          </button>
+          <div v-if="canDownloadCurrent && showMoreDlQuality" class="more-quality" @click.stop>
+            <template v-if="currentQualities.length">
+              <button
+                v-for="q in currentQualities"
+                :key="q"
+                type="button"
+                class="more-quality-option"
+                @click="downloadCurrent(q)"
+              >{{ getQualityDisplay(q, currentPlaying?.types) }}</button>
+            </template>
+            <div v-else class="more-quality-empty">该曲暂无可用音质</div>
+          </div>
           <button
             v-if="currentLocalPath"
             type="button"
@@ -279,32 +348,44 @@
           @dblclick="onPlayAt(i)"
         >
           <span class="queue-index">{{ i === currentQueueIndex && !isPaused ? '▶' : i + 1 }}</span>
-          <div class="queue-info">
+          <div class="queue-info" @click="onPlayAt(i)">
             <div class="queue-name">{{ cleanText(entry.item.name) }}</div>
             <div class="queue-meta">{{ formatArtists(entry.item.singer) }}</div>
           </div>
-          <button
-            class="queue-fav-btn"
-            :class="{ active: isQueueFavorite(entry.item, entry.source) }"
-            @click.stop="onToggleQueueFavorite(entry.item, entry.source)"
-            :title="isQueueFavorite(entry.item, entry.source) ? '取消收藏' : '收藏'"
-          >
-            <svg viewBox="0 0 24 24" width="14" height="14" :fill="isQueueFavorite(entry.item, entry.source) ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.6l-1-1a5.5 5.5 0 0 0-7.8 7.8l1 1L12 21l7.8-7.6 1-1a5.5 5.5 0 0 0 0-7.8z"/></svg>
-          </button>
-          <button
-            class="queue-play-btn"
-            :class="{ playing: i === currentQueueIndex && currentPlaying && !isPaused }"
-            @click.stop="onQueuePlayClick(i)"
-            :title="i === currentQueueIndex && currentPlaying && !isPaused ? '暂停' : '播放'"
-          >
-            <svg v-if="i === currentQueueIndex && currentPlaying && !isPaused" viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
-            <svg v-else viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><polygon points="7,3 21,12 7,21"/></svg>
-          </button>
-          <button class="queue-remove" @click.stop="removeFromQueue(i)" title="移除">×</button>
+          <div class="queue-actions">
+            <button
+              type="button"
+              class="queue-action-btn queue-fav-btn"
+              :class="{ active: isQueueFavorite(entry.item, entry.source) }"
+              @click.stop="onToggleQueueFavorite(entry.item, entry.source)"
+              :title="isQueueFavorite(entry.item, entry.source) ? '取消收藏' : '收藏'"
+            >
+              <svg viewBox="0 0 24 24" width="14" height="14" :fill="isQueueFavorite(entry.item, entry.source) ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.6l-1-1a5.5 5.5 0 0 0-7.8 7.8l1 1L12 21l7.8-7.6 1-1a5.5 5.5 0 0 0 0-7.8z"/></svg>
+            </button>
+            <button
+              type="button"
+              class="queue-action-btn queue-play-btn"
+              :class="{ playing: i === currentQueueIndex && currentPlaying && !isPaused }"
+              @click.stop="onQueuePlayClick(i)"
+              :title="i === currentQueueIndex && currentPlaying && !isPaused ? '暂停' : '播放'"
+            >
+              <svg v-if="i === currentQueueIndex && currentPlaying && !isPaused" viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+              <svg v-else viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><polygon points="7,3 21,12 7,21"/></svg>
+            </button>
+            <button type="button" class="queue-action-btn queue-remove" @click.stop="removeFromQueue(i)" title="移除">×</button>
+          </div>
         </div>
       </div>
       <div v-else class="queue-empty">列表为空，在搜索页点击 + 或试听添加歌曲</div>
     </div>
+
+    <PickPlaylistModal
+      v-if="pickPlaylistTrack"
+      :track="pickPlaylistTrack.track"
+      :source="pickPlaylistTrack.source"
+      @close="pickPlaylistTrack = null"
+      @added="onAddedToPlaylist"
+    />
   </div>
 </template>
 
@@ -318,15 +399,21 @@ import {
   togglePause, stopPlay, seekTo, setVolume, toggleMute, fmtTime, initPlayer,
   playNext, playPrev, togglePlayMode, resumeOrTogglePause, unlockAudioFromGesture,
   removeFromQueue, clearQueue, playTrackAt, openFullscreenPlayer,
-  currentLocalTrackPath, tryFillCoverFromNetwork,
+  currentLocalTrackPath, tryFillCoverFromNetwork, showPlayerNotice,
 } from '../stores/player.js'
 import { onMounted, onUnmounted, ref, computed, watch } from 'vue'
 import { cleanText, formatArtists } from '../utils/text.js'
 import SpectrumVisualizer from './SpectrumVisualizer.vue'
 import CoverArt from './CoverArt.vue'
+import PickPlaylistModal from './PickPlaylistModal.vue'
 import { isFavorite, toggleFavorite } from '../stores/library.js'
 import { openTagEditTrack } from '../utils/tagEdit.js'
 import { isMobileUiContext } from '../utils/device.js'
+import { api } from '../api.js'
+import { assertActiveSourceForDownload } from '../stores/downloadGuard.js'
+import { buildDownloadTask, getItemQualities } from '../utils/musicPayload.js'
+import { getQualityDisplay, getQualityLabel } from '../utils/quality.js'
+import { useQualityMenuPosition } from '../utils/qualityMenu.js'
 
 const queuePanelRef = ref(null)
 const queueBtnRef = ref(null)
@@ -337,6 +424,14 @@ const isCompact = ref(false)
 const mobileLayoutTick = ref(0)
 const showVolumePanel = ref(false)
 const showMorePanel = ref(false)
+const showMoreDlQuality = ref(false)
+const downloadMenuOpen = ref(false)
+const pickPlaylistTrack = ref(null)
+const {
+  menuStyle: downloadMenuStyle,
+  positionMenu: positionDownloadMenu,
+  clearMenuPosition: clearDownloadMenuPosition,
+} = useQualityMenuPosition()
 
 function onCoverError() {
   tryFillCoverFromNetwork()
@@ -365,6 +460,45 @@ const isCurrentFavorite = computed(() => currentPlaying.value ? isFavorite({
 
 const currentLocalPath = currentLocalTrackPath
 
+const canDownloadCurrent = computed(() => {
+  const t = currentPlaying.value
+  if (!t) return false
+  if (currentLocalPath.value) return false
+  return true
+})
+
+const currentQualities = computed(() => {
+  if (!currentPlaying.value) return []
+  return getItemQualities(currentPlaying.value)
+})
+
+function closeDownloadMenu() {
+  downloadMenuOpen.value = false
+  clearDownloadMenuPosition()
+}
+
+function toggleDownloadMenu(event) {
+  downloadMenuOpen.value = !downloadMenuOpen.value
+  if (downloadMenuOpen.value) positionDownloadMenu(event?.currentTarget)
+  else clearDownloadMenuPosition()
+}
+
+async function downloadCurrent(quality) {
+  const item = currentPlaying.value
+  if (!item || currentLocalPath.value) return
+  closeDownloadMenu()
+  showMoreDlQuality.value = false
+  showMorePanel.value = false
+  if (!(await assertActiveSourceForDownload())) return
+  const source = item.source || 'kw'
+  try {
+    await api.download.add([buildDownloadTask(item, source, quality)])
+    showPlayerNotice(`已添加下载: ${item.name || ''} (${getQualityLabel(quality, item.types)})`, 2500)
+  } catch (e) {
+    showPlayerNotice(e?.message || '下载失败', 3000)
+  }
+}
+
 function isQueueFavorite(item, source) {
   return isFavorite({ ...item, source, localPath: item.localPath })
 }
@@ -391,6 +525,30 @@ function onToggleQueueFavorite(item, source) {
   toggleFavorite({ ...item, source, localPath: item.localPath })
 }
 
+function openPickCurrentPlaylist() {
+  if (!currentPlaying.value) return
+  pickPlaylistTrack.value = {
+    track: {
+      ...currentPlaying.value,
+      source: currentPlaying.value.source,
+      localPath: currentPlaying.value.localPath,
+    },
+    source: currentPlaying.value.source || 'local',
+  }
+}
+
+function onMoreOpenPlaylist() {
+  showMorePanel.value = false
+  showMoreDlQuality.value = false
+  openPickCurrentPlaylist()
+}
+
+function onAddedToPlaylist({ playlist, duplicate }) {
+  pickPlaylistTrack.value = null
+  if (duplicate) showPlayerNotice('歌曲已在歌单中', 2500)
+  else showPlayerNotice(`已加入歌单：${playlist?.name || ''}`, 2500)
+}
+
 function onOpenTagEdit() {
   if (!currentLocalPath.value) return
   openTagEditTrack(currentLocalPath.value)
@@ -413,8 +571,14 @@ watch(isCompact, (compact) => {
   if (!compact) {
     showVolumePanel.value = false
     showMorePanel.value = false
+    showMoreDlQuality.value = false
   }
 }, { immediate: true })
+
+watch(currentPlaying, () => {
+  closeDownloadMenu()
+  showMoreDlQuality.value = false
+})
 
 const moreBtnTitle = computed(() => {
   const parts = ['更多']
@@ -466,14 +630,20 @@ onUnmounted(() => {
   compactObserver?.disconnect()
   compactObserver = null
   clearTimeout(volumeLeaveTimer)
+  clearDownloadMenuPosition()
   document.documentElement.style.removeProperty('--player-height')
 })
 
 function onDocumentClick(e) {
   if (showFullscreenPlayer.value) return
+  if (pickPlaylistTrack.value) return
   const t = e.target
+  if (downloadMenuOpen.value && !t?.closest?.('[data-player-dl]')) closeDownloadMenu()
   if (showMorePanel.value) {
-    if (!moreWrapRef.value?.contains(t)) showMorePanel.value = false
+    if (!moreWrapRef.value?.contains(t)) {
+      showMorePanel.value = false
+      showMoreDlQuality.value = false
+    }
   }
   if (showQueuePanel.value) {
     const panel = queuePanelRef.value
@@ -493,7 +663,12 @@ function onToggleQueuePanel() {
 
 function toggleMorePanel() {
   showMorePanel.value = !showMorePanel.value
-  if (showMorePanel.value) showQueuePanel.value = false
+  if (showMorePanel.value) {
+    showQueuePanel.value = false
+    closeDownloadMenu()
+  } else {
+    showMoreDlQuality.value = false
+  }
 }
 
 function onMoreOpenQueue() {
@@ -801,6 +976,79 @@ async function onQueuePlayClick(index) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  color: var(--text-muted);
+}
+.ctrl-playlist {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  border: 1px solid var(--border);
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+}
+.ctrl-playlist:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-muted);
+}
+.dl-wrap {
+  position: relative;
+  flex-shrink: 0;
+}
+.ctrl-download {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  border: 1px solid var(--border);
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+}
+.ctrl-download:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-muted);
+}
+.quality-menu {
+  background: var(--bg-elevated, var(--bg-card));
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 6px 0;
+  min-width: 160px;
+}
+.quality-menu-title {
+  padding: 6px 12px 4px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.quality-option {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 12px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+}
+.quality-option:hover {
+  background: var(--bg-hover);
+  color: var(--accent);
+}
+.quality-empty {
+  padding: 10px 12px;
+  font-size: 13px;
   color: var(--text-muted);
 }
 .ctrl-sleep {
@@ -1156,20 +1404,13 @@ async function onQueuePlayClick(index) {
   white-space: nowrap;
   margin-top: 1px;
 }
-.queue-remove {
-  background: none;
-  border: none;
-  color: var(--text-muted);
-  font-size: 16px;
-  padding: 0 4px;
-  opacity: 0;
-  transition: opacity 0.15s;
+.queue-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   flex-shrink: 0;
 }
-.queue-item:hover .queue-remove { opacity: 1; }
-.queue-remove:hover { color: var(--error); }
-
-.queue-fav-btn {
+.queue-action-btn {
   width: 28px;
   height: 28px;
   padding: 0;
@@ -1182,50 +1423,41 @@ async function onQueuePlayClick(index) {
   justify-content: center;
   flex-shrink: 0;
   cursor: pointer;
+  transition: all 0.15s;
 }
-.queue-fav-btn svg {
+.queue-action-btn svg {
   display: block;
   flex-shrink: 0;
 }
-.queue-fav-btn:hover {
-  color: #ef4444;
-  border-color: rgba(239, 68, 68, 0.45);
-  background: rgba(239, 68, 68, 0.1);
+.queue-action-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-muted);
 }
+.queue-remove {
+  font-size: 16px;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity 0.15s, color 0.15s, border-color 0.15s, background 0.15s;
+}
+.queue-item:hover .queue-remove { opacity: 1; }
+.queue-remove:hover { color: var(--error); border-color: rgba(239, 68, 68, 0.45); background: rgba(239, 68, 68, 0.1); }
+
+.queue-fav-btn:hover,
 .queue-fav-btn.active {
   color: #ef4444;
   border-color: rgba(239, 68, 68, 0.45);
   background: rgba(239, 68, 68, 0.1);
 }
 
-.queue-play-btn {
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: transparent;
-  color: var(--text-secondary);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  transition: all 0.15s;
-}
-.queue-play-btn svg {
-  display: block;
-}
 .queue-play-btn:not(.playing) svg {
   margin-left: 2px;
 }
-.queue-play-btn:hover {
-  color: var(--accent);
-  border-color: var(--accent);
-  background: var(--accent-muted);
-}
+.queue-play-btn:hover,
 .queue-item.active .queue-play-btn {
   color: var(--accent);
   border-color: var(--accent);
+  background: var(--accent-muted);
 }
 .queue-empty {
   padding: 32px 16px;
@@ -1415,6 +1647,40 @@ async function onQueuePlayClick(index) {
   cursor: default;
 }
 
+.player-bar.compact .more-quality {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 0 4px 4px;
+  padding: 4px;
+  border-radius: var(--radius);
+  background: var(--bg-input);
+}
+
+.player-bar.compact .more-quality-option {
+  display: block;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  border-radius: calc(var(--radius) - 2px);
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.player-bar.compact .more-quality-option:hover {
+  background: var(--bg-hover);
+  color: var(--accent);
+}
+
+.player-bar.compact .more-quality-empty {
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
 .player-bar.compact .ctrl-queue {
   width: 38px;
   height: 38px;
@@ -1422,20 +1688,48 @@ async function onQueuePlayClick(index) {
 }
 
 .player-bar.compact .queue-panel {
-  left: 12px;
-  right: 12px;
-  bottom: calc(var(--player-height) + 12px);
+  left: 10px;
+  right: 10px;
+  bottom: calc(var(--player-height) + 10px + env(safe-area-inset-bottom, 0px));
   width: auto;
-  max-height: min(50vh, 360px);
+  max-height: min(62dvh, 520px);
+  border-radius: 16px;
 }
 
-.player-bar.compact .queue-play-btn {
-  width: 32px;
-  height: 32px;
+.player-bar.compact .queue-header {
+  padding: 12px 12px 10px;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.player-bar.compact .queue-list {
+  flex: 1;
+  min-height: 0;
+  max-height: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.player-bar.compact .queue-item {
+  padding: 10px 10px;
+  gap: 8px;
+}
+
+.player-bar.compact .queue-info {
+  cursor: pointer;
+}
+
+.player-bar.compact .queue-action-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
 }
 
 .player-bar.compact .queue-remove {
   opacity: 1;
+}
+
+.player-bar.compact .queue-actions {
+  gap: 4px;
 }
 
 @media (max-width: 768px) {
@@ -1450,6 +1744,26 @@ async function onQueuePlayClick(index) {
 
   .bar-spectrum {
     opacity: 0.62;
+  }
+
+  .player-bar.compact .queue-panel {
+    left: 8px;
+    right: 8px;
+    bottom: calc(var(--player-height) + 8px + env(safe-area-inset-bottom, 0px));
+    max-height: min(58dvh, 480px);
+  }
+
+  .player-bar.compact .queue-index {
+    width: 18px;
+    font-size: 11px;
+  }
+
+  .player-bar.compact .queue-name {
+    font-size: 14px;
+  }
+
+  .player-bar.compact .queue-meta {
+    font-size: 12px;
   }
 }
 </style>

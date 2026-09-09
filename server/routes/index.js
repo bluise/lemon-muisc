@@ -5,6 +5,7 @@ import { sourceRouter } from './source.js'
 import { searchRouter } from './search.js'
 import { albumRouter } from './album.js'
 import { playlistRouter } from './playlist.js'
+import { discoverRouter } from './discover.js'
 import { downloadRouter } from './download.js'
 import { tagRouter } from './tag.js'
 import { playRouter } from './play.js'
@@ -27,6 +28,7 @@ apiRouter.use('/source', sourceRouter)
 apiRouter.use('/search', searchRouter)
 apiRouter.use('/album', albumRouter)
 apiRouter.use('/playlist', playlistRouter)
+apiRouter.use('/discover', discoverRouter)
 apiRouter.use('/download', downloadRouter)
 apiRouter.use('/tag', tagRouter)
 apiRouter.use('/play', playRouter)

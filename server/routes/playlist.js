@@ -1,4 +1,4 @@
-﻿import { Router } from 'express'
+import { Router } from 'express'
 import { fetchPlaylist, fetchRecommendPlaylists } from '../musicSdk.js'
 import { getDisplaySources } from '../utils/displaySources.js'
 import { formatUserError } from '../utils/userError.js'
@@ -18,12 +18,14 @@ playlistRouter.get('/sources', (req, res) => {
 
 playlistRouter.get('/recommend', async (req, res) => {
   try {
-    const { source = 'kw', sort = 'hot', page = 1 } = req.query
+    const { source = 'kw', sort = 'hot', page = 1, limit } = req.query
     if (!availableSources(req)[source]) {
       return res.status(400).json({ error: `不支持的平台: ${source}` })
     }
+    const pageNum = Math.max(1, Number(page) || 1)
+    const limitNum = Math.min(60, Math.max(10, Number(limit) || 30))
     const data = await playlistLimiter(() => withTimeout(
-      fetchRecommendPlaylists(source, String(sort), Number(page)),
+      fetchRecommendPlaylists(source, String(sort), pageNum, limitNum),
       RECOMMEND_TIMEOUT_MS,
       '获取推荐歌单超时，请稍后重试',
     ))

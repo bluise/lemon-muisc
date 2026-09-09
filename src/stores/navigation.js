@@ -6,6 +6,10 @@ export const pendingRoutePage = ref('default')
 const ROUTE_PAGE_MAP = {
   Search: 'search',
   Discover: 'discover',
+  DiscoverPlaylists: 'discover',
+  DiscoverNewSongs: 'discover',
+  DiscoverNewAlbums: 'discover',
+  DiscoverRanks: 'discover',
   Library: 'library',
   LibraryPlaylists: 'library',
   LibraryAlbum: 'library',
@@ -45,6 +49,7 @@ function resolvePage(to) {
   if (typeof to === 'string') {
     const path = to.split('?')[0]
     if (PATH_PAGE_MAP[path]) return PATH_PAGE_MAP[path]
+    if (path.startsWith('/discover')) return 'discover'
     if (path.startsWith('/library')) return 'library'
     if (path.startsWith('/tag')) return 'tag'
     return 'default'

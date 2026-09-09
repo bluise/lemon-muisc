@@ -310,7 +310,7 @@ async function enrichKgSongsCoversByAlbum(songs, { playlistCover = '', concurren
     const albumPic = s.albumId ? kgAlbumCoverCache.get(String(s.albumId).trim()) : ''
     const pic = (typeof albumPic === 'string' ? albumPic : '') || fallback
     if (!pic) return s
-    return { ...s, picUrl: pic, img: pic }
+    return { ...s, picUrl: pic, img: pic, coverFallback: Boolean(fallback && pic === fallback) }
   })
 }
 
@@ -980,41 +980,53 @@ async function wyAlbum(id) {
 async function txAlbum(id) {
   const albumMid = String(id)
   const albumID = /^\d+$/.test(albumMid) ? Number(albumMid) : 0
-  const payload = {
-    comm: { cv: 1602, ct: 20 },
-    detail: {
-      method: 'GetAlbumDetail',
-      param: { albumMid, albumID },
-      module: 'music.musichallAlbum.AlbumInfoServer',
-    },
-    songs: {
-      method: 'GetAlbumSongList',
-      param: { albumMid, begin: 0, num: 100, order: 1 },
-      module: 'music.musichallAlbum.AlbumSongList',
-    },
-  }
-  const buf = await req('get', `https://u.y.qq.com/cgi-bin/musicu.fcg?format=json&data=${encodeURIComponent(JSON.stringify(payload))}`)
-  const data = parseJSON(buf)
-  if (data?.code !== 0) throw new Error('无法获取 QQ 音乐专辑')
+  const pageSize = 100
+  let begin = 0
+  let detail = null
+  let total = 0
+  const list = []
 
-  const detail = data?.detail?.data || {}
-  const songData = data?.songs?.data || {}
-  const rawSongs = songData.songList || []
-  const list = rawSongs
-    .map(entry => mapTxSongItem(entry.songInfo || entry))
-    .filter(s => s.name || s.id)
+  while (true) {
+    const payload = {
+      comm: { cv: 1602, ct: 20 },
+      detail: {
+        method: 'GetAlbumDetail',
+        param: { albumMid, albumID },
+        module: 'music.musichallAlbum.AlbumInfoServer',
+      },
+      songs: {
+        method: 'GetAlbumSongList',
+        param: { albumMid, begin, num: pageSize, order: 1 },
+        module: 'music.musichallAlbum.AlbumSongList',
+      },
+    }
+    const buf = await req('get', `https://u.y.qq.com/cgi-bin/musicu.fcg?format=json&data=${encodeURIComponent(JSON.stringify(payload))}`)
+    const data = parseJSON(buf)
+    if (data?.code !== 0) throw new Error('无法获取 QQ 音乐专辑')
+
+    if (!detail) detail = data?.detail?.data || {}
+    const songData = data?.songs?.data || {}
+    total = parseInt(songData.totalNum, 10) || total
+    const batch = (songData.songList || [])
+      .map(entry => mapTxSongItem(entry.songInfo || entry))
+      .filter(s => s.name || s.id)
+    list.push(...batch)
+    if (!batch.length || list.length >= total || batch.length < pageSize) break
+    begin += pageSize
+  }
+
   if (!list.length) throw new Error('无法获取 QQ 音乐专辑')
 
-  const basic = detail.basicInfo || detail
+  const basic = detail?.basicInfo || detail || {}
   return {
     list,
-    total: songData.totalNum || list.length,
+    total: total || list.length,
     source: 'tx',
     info: {
       name: cleanHtml(basic.name || basic.title || list[0]?.album || ''),
       img: basic.pic || basic.picUrl || list[0]?.img || '',
-      desc: cleanHtml(detail.desc || detail.description || basic.desc || ''),
-      author: formatTxSingers(detail.singer || basic.singer),
+      desc: cleanHtml(detail?.desc || detail?.description || basic.desc || ''),
+      author: formatTxSingers(detail?.singer || basic.singer),
       publishTime: basic.publishDate || basic.aDate || basic.pubTime || basic.time_public || '',
       genre: cleanHtml(basic.genreNew || basic.genre || ''),
       language: cleanHtml(basic.language || ''),
@@ -1332,7 +1344,7 @@ function applyPlaylistTrackCoverFallback(list, cover) {
   if (!resolvedCover) return list
   return list.map((s) => {
     if (s?.picUrl || s?.img) return s
-    return { ...s, picUrl: resolvedCover, img: resolvedCover }
+    return { ...s, picUrl: resolvedCover, img: resolvedCover, coverFallback: true }
   })
 }
 
@@ -1418,33 +1430,107 @@ async function wyPlaylist({ id, token }, options = {}) {
   return buildPlaylistResponse(list, total, 'wy', info)
 }
 
-async function txPlaylist({ id }, options = {}) {
-  const buf = await req('get',
-    `https://c.y.qq.com/qzone/fcg-bin/fcg_ucc_getcdinfo_byids_cp.fcg?type=1&json=1&utf8=1&onlysong=0&new_format=1&disstid=${id}&loginUin=0&hostUin=0&format=json&inCharset=utf8&outCharset=utf-8&notice=0&platform=yqq.json&needNewCode=0`,
-    null, {
-      Referer: `https://y.qq.com/n/yqq/playlist/${id}.html`,
-      Origin: 'https://y.qq.com',
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    })
-  const data = parseJSON(buf)
-  const cd = data?.cdlist?.[0]
-  if (!cd?.songlist) throw new Error('无法获取 QQ 音乐歌单')
+const TX_PLAYLIST_HEADERS = (id) => ({
+  Referer: `https://y.qq.com/n/yqq/playlist/${id}.html`,
+  Origin: 'https://y.qq.com',
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+})
 
-  const all = cd.songlist.map(mapTxSongItem)
-  const info = {
+/** QQ 歌单默认常只回 50 首；必须带 song_begin/song_num，并用 songnum 作为真实总数 */
+async function txFetchPlaylistCd(id, songBegin = 0, songNum = 1000) {
+  const url = `https://c.y.qq.com/qzone/fcg-bin/fcg_ucc_getcdinfo_byids_cp.fcg`
+    + `?type=1&json=1&utf8=1&onlysong=0&new_format=1&disstid=${id}`
+    + `&song_begin=${songBegin}&song_num=${songNum}`
+    + `&loginUin=0&hostUin=0&format=json&inCharset=utf8&outCharset=utf-8`
+    + `&notice=0&platform=yqq.json&needNewCode=0`
+  const data = parseJSON(await req('get', url, null, TX_PLAYLIST_HEADERS(id)))
+  const cd = data?.cdlist?.[0]
+  if (data?.code !== 0 || !cd) return null
+  return cd
+}
+
+async function txFetchPlaylistCdViaMusicu(id, songBegin = 0, songNum = 1000) {
+  const payload = {
+    comm: {
+      ct: 24,
+      cv: 0,
+      format: 'json',
+      platform: 'yqq.json',
+      uin: '0',
+      g_tk: 5381,
+      needNewCode: 1,
+    },
+    req_1: {
+      module: 'music.srfDissInfo.aiDissInfo',
+      method: 'uniform_get_Dissinfo',
+      param: {
+        disstid: Number(id) || id,
+        userinfo: 1,
+        tag: 1,
+        orderlist: 1,
+        song_begin: songBegin,
+        song_num: songNum,
+        onlysonglist: 0,
+        enc_host_uin: '',
+      },
+    },
+  }
+  const data = parseJSON(await req('post', 'https://u.y.qq.com/cgi-bin/musicu.fcg', JSON.stringify(payload), {
+    ...TX_PLAYLIST_HEADERS(id),
+    Referer: `https://y.qq.com/n/yqq/playsquare/${id}.html`,
+    'Content-Type': 'application/json',
+  }))
+  const result = data?.req_1?.data
+  if (data?.code !== 0 || data?.req_1?.code !== 0 || !result) return null
+  const dirinfo = result.dirinfo || {}
+  return {
+    dissname: dirinfo.title || dirinfo.dissname || '',
+    logo: dirinfo.picurl || dirinfo.logo || '',
+    desc: dirinfo.desc || '',
+    nickname: dirinfo.host_nick || dirinfo.nickname || '',
+    visitnum: dirinfo.listennum || dirinfo.visitnum || 0,
+    songnum: result.songnum || result.total_song_num || (result.songlist || []).length,
+    songlist: result.songlist || [],
+  }
+}
+
+function txPlaylistInfoFromCd(cd) {
+  return {
     name: cleanHtml(cd.dissname),
     img: cd.logo || '',
     desc: cleanHtml(cd.desc || ''),
     author: cleanHtml(cd.nickname || ''),
     play_count: formatPlayCount(cd.visitnum),
   }
+}
+
+async function txPlaylist({ id }, options = {}) {
+  const pageSize = options.partial ? PLAYLIST_PARTIAL_LIMIT : 1000
+  let cd = await txFetchPlaylistCd(id, 0, pageSize)
+  if (!cd?.songlist) cd = await txFetchPlaylistCdViaMusicu(id, 0, pageSize)
+  if (!cd?.songlist) throw new Error('无法获取 QQ 音乐歌单')
+
+  const info = txPlaylistInfoFromCd(cd)
+  const total = parseInt(cd.songnum, 10) || cd.songlist.length || 0
+  let all = (cd.songlist || []).map(mapTxSongItem)
 
   if (options.partial) {
-    const list = all.slice(0, PLAYLIST_PARTIAL_LIMIT)
-    return buildPlaylistResponse(list, all.length, 'tx', info, { partial: true, hasMore: all.length > list.length })
+    return buildPlaylistResponse(all, total || all.length, 'tx', info, {
+      partial: true,
+      hasMore: (total || 0) > all.length,
+    })
   }
 
-  return buildPlaylistResponse(all, all.length, 'tx', info)
+  while (all.length < total) {
+    const next = await txFetchPlaylistCd(id, all.length, pageSize)
+      || await txFetchPlaylistCdViaMusicu(id, all.length, pageSize)
+    const batch = (next?.songlist || []).map(mapTxSongItem)
+    if (!batch.length) break
+    all = all.concat(batch)
+    if (batch.length < pageSize) break
+  }
+
+  return buildPlaylistResponse(all, total || all.length, 'tx', info)
 }
 
 function parseKuwoPlaylistBody(raw) {
@@ -1802,7 +1888,12 @@ async function kgFetchMobilePlaylistPages(specialId, { pageSize = 100, partial =
     }
   }
 
-  const list = await enrichKgSongsCoversByAlbum(pageResults.flat(), { playlistCover })
+  const flat = pageResults.flat()
+  // 仅充实首屏封面，其余走兜底，避免等全部专辑封面才出列表
+  const headSize = Math.min(50, flat.length)
+  const head = await enrichKgSongsCoversByAlbum(flat.slice(0, headSize), { playlistCover })
+  const rest = applyPlaylistTrackCoverFallback(flat.slice(headSize), playlistCover)
+  const list = head.concat(rest)
   const infoFinal = finalizePlaylistInfo(info, list)
   const enriched = applyPlaylistTrackCoverFallback(list, infoFinal.img || playlistCover)
   return {
@@ -1867,15 +1958,17 @@ async function kgPlaylistFromHtml(id) {
     throw new Error('无法解析酷狗歌单歌曲，请尝试使用完整分享链接')
   }
 
-  const list = await enrichKgSongsCoversByAlbum(
-    listRaw.map(item => {
-      if (typeof item === 'string') {
-        return mapKgSongItem({ hash: item, SongName: '', SingerName: '' })
-      }
-      return mapKgSongItem(item)
-    }).filter(s => s.hash || s.name),
-    { playlistCover: info.img || '' },
-  )
+  const mapped = listRaw.map(item => {
+    if (typeof item === 'string') {
+      return mapKgSongItem({ hash: item, SongName: '', SingerName: '' })
+    }
+    return mapKgSongItem(item)
+  }).filter(s => s.hash || s.name)
+  const playlistCover = info.img || ''
+  const headSize = Math.min(50, mapped.length)
+  const head = await enrichKgSongsCoversByAlbum(mapped.slice(0, headSize), { playlistCover })
+  const rest = applyPlaylistTrackCoverFallback(mapped.slice(headSize), playlistCover)
+  const list = head.concat(rest)
 
   const infoFinal = finalizePlaylistInfo(info, list)
   const enriched = applyPlaylistTrackCoverFallback(list, infoFinal.img || info.img || '')
@@ -1927,15 +2020,15 @@ async function kgPlaylistFromGid(globalCollectionId, options = {}) {
   const playlistCover = info.img || ''
 
   if (options.partial) {
-    const list = await enrichKgSongsCoversByAlbum(firstBatch, { playlistCover })
+    // 首屏尽快返回：用歌单封面兜底，不阻塞拉专辑封面
+    const list = applyPlaylistTrackCoverFallback(firstBatch, playlistCover)
     const infoFinal = finalizePlaylistInfo(info, list)
-    const enriched = applyPlaylistTrackCoverFallback(list, infoFinal.img || playlistCover)
     return {
-      list: enriched,
-      total: total || enriched.length,
+      list: applyPlaylistTrackCoverFallback(list, infoFinal.img || playlistCover),
+      total: total || list.length,
       source: 'kg',
       info: infoFinal,
-      hasMore: total > enriched.length,
+      hasMore: total > list.length,
       partial: true,
     }
   }
@@ -1949,7 +2042,12 @@ async function kgPlaylistFromGid(globalCollectionId, options = {}) {
     }
   }
 
-  const list = await enrichKgSongsCoversByAlbum(batches.flat(), { playlistCover })
+  const flat = batches.flat()
+  // 仅充实首屏封面，其余用兜底，避免等全部专辑封面才返回
+  const headSize = Math.min(50, flat.length)
+  const head = await enrichKgSongsCoversByAlbum(flat.slice(0, headSize), { playlistCover })
+  const rest = applyPlaylistTrackCoverFallback(flat.slice(headSize), playlistCover)
+  const list = head.concat(rest)
   const infoFinal = finalizePlaylistInfo(info, list)
   const enriched = applyPlaylistTrackCoverFallback(list, infoFinal.img || playlistCover)
   return { list: enriched, total: total || enriched.length, source: 'kg', info: infoFinal, hasMore: false, partial: false }
@@ -2053,7 +2151,7 @@ async function txRecommendPlaylists(sort = 'hot', page = 1, limit = 36) {
       author: item.creator_info?.nick,
       img: item.cover_url_medium || item.cover_url_big,
       play_count: formatPlayCount(item.access_num),
-      total: item.song_ids?.length || 0,
+      total: item.song_num || item.songnum || item.total_song_num || item.song_ids?.length || 0,
       desc: item.desc,
       source: 'tx',
     })),
@@ -2088,7 +2186,7 @@ async function kwRecommendPlaylists(sort = 'hot', page = 1, limit = 36) {
   }
 }
 
-async function kgRecommendPlaylists(sort = 'hot', page = 1) {
+async function kgRecommendPlaylists(sort = 'hot', page = 1, limit = 30) {
   const sortMap = { hot: '6', new: '7', recommend: '5' }
   const t = sortMap[sort] || sortMap.recommend
   const buf = await req('get',
@@ -2096,20 +2194,23 @@ async function kgRecommendPlaylists(sort = 'hot', page = 1) {
     null, { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' })
   const data = parseJSON(buf)
   if (data?.status !== 1 || !data.special_db) throw new Error('无法获取酷狗推荐歌单')
+  const list = data.special_db.map(item => mapRecommendItem({
+    id: `id_${item.specialid}`,
+    name: item.specialname,
+    author: item.nickname || item.singername,
+    img: item.imgurl?.replace('{size}', '400') || item.img,
+    play_count: formatPlayCount(item.play_count || item.total_play_count),
+    total: item.songcount,
+    desc: item.intro,
+    source: 'kg',
+  }))
+  const total = parseInt(data.recordcount, 10) || 0
   return {
-    list: data.special_db.map(item => mapRecommendItem({
-      id: `id_${item.specialid}`,
-      name: item.specialname,
-      author: item.nickname || item.singername,
-      img: item.imgurl?.replace('{size}', '400') || item.img,
-      play_count: formatPlayCount(item.play_count || item.total_play_count),
-      total: item.songcount,
-      desc: item.intro,
-      source: 'kg',
-    })),
-    total: data.recordcount || data.special_db.length,
+    list,
+    total,
     page,
-    limit: data.special_db.length,
+    limit: list.length || limit,
+    hasMore: total ? page * (list.length || limit) < total : list.length > 0,
     source: 'kg',
   }
 }
@@ -2135,7 +2236,7 @@ function extractMgRecommendItems(contents, list = [], ids = new Set()) {
   return list
 }
 
-async function mgRecommendPlaylists(_sort = 'hot', page = 1) {
+async function mgRecommendPlaylists(_sort = 'hot', page = 1, _limit = 30) {
   const buf = await req('get',
     `https://app.c.nf.migu.cn/pc/bmw/page-data/playlist-square-recommend/v1.0?templateVersion=2&pageNo=${page}`,
     null, {
@@ -2145,7 +2246,15 @@ async function mgRecommendPlaylists(_sort = 'hot', page = 1) {
   const data = parseJSON(buf)
   if (data?.code !== '000000' || !data.data?.contents) throw new Error('无法获取咪咕推荐歌单')
   const list = extractMgRecommendItems(data.data.contents)
-  return { list, total: list.length, page, limit: list.length, source: 'mg' }
+  // 咪咕不返回总数：有下一页数据则继续翻页
+  return {
+    list,
+    total: 0,
+    page,
+    limit: list.length || _limit,
+    hasMore: list.length > 0,
+    source: 'mg',
+  }
 }
 
 const recommendMap = {
@@ -2156,10 +2265,10 @@ const recommendMap = {
   mg: mgRecommendPlaylists,
 }
 
-export async function fetchRecommendPlaylists(source, sort = 'hot', page = 1) {
+export async function fetchRecommendPlaylists(source, sort = 'hot', page = 1, limit = 30) {
   if (!AVAILABLE_SOURCES[source]) throw new Error(`不支持的平台: ${source}`)
   const fn = recommendMap[source]
-  return fn(sort, page)
+  return fn(sort, page, limit)
 }
 
 // --- 歌词获取 ---

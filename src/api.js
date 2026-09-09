@@ -169,9 +169,45 @@ export const api = {
       if (partial) qs.set('partial', '1')
       return request(`/playlist?${qs}`, { timeout: partial ? 30000 : 120000, ...options })
     },
-    recommend: (source, sort = 'hot', page = 1, options = {}) =>
-      request(`/playlist/recommend?source=${source}&sort=${sort}&page=${page}`, options),
+    recommend: (source, sort = 'hot', page = 1, limitOrOptions = 30, maybeOptions = {}) => {
+      const limit = typeof limitOrOptions === 'number' ? limitOrOptions : 30
+      const options = typeof limitOrOptions === 'object' && limitOrOptions
+        ? limitOrOptions
+        : maybeOptions
+      const qs = new URLSearchParams({
+        source,
+        sort,
+        page: String(page),
+        limit: String(limit),
+      })
+      return request(`/playlist/recommend?${qs}`, options)
+    },
     sources: () => request('/playlist/sources'),
+  },
+  discover: {
+    newSongs: (source, region = '', page = 1, limit = 27, options = {}) => {
+      const qs = new URLSearchParams({ source, page: String(page), limit: String(limit) })
+      if (region) qs.set('region', region)
+      return request(`/discover/new-songs?${qs}`, options)
+    },
+    newAlbums: (source, region = '', page = 1, limit = 20, options = {}) => {
+      const qs = new URLSearchParams({ source, page: String(page), limit: String(limit) })
+      if (region) qs.set('region', region)
+      return request(`/discover/new-albums?${qs}`, options)
+    },
+    toplists: (source, options = {}) =>
+      request(`/discover/toplists?source=${encodeURIComponent(source)}`, options),
+    toplist: (source, id, page = 1, limit = 100, options = {}) => {
+      const qs = new URLSearchParams({
+        source,
+        id: String(id),
+        page: String(page),
+        limit: String(limit),
+      })
+      return request(`/discover/toplist?${qs}`, options)
+    },
+    regions: (source, kind = 'songs', options = {}) =>
+      request(`/discover/regions?source=${encodeURIComponent(source)}&kind=${encodeURIComponent(kind)}`, options),
   },
   download: {
     list: () => request('/download/list'),

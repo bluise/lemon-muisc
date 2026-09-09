@@ -1,13 +1,16 @@
-# README / 飞牛帖配图说明（v1.2.9）
+# README / 飞牛帖配图说明（v1.2.12）
 
-发帖或更新 README 时，优先使用下列实机图（按新人阅读顺序：下载 → 标签 → 其它）。
+发帖或更新 README 时，优先使用下列实机图（按新人阅读顺序：发现本版 → 下载 → 标签 → 其它）。
 
 ## 当前保留
 
 | 文件 | 用途 |
 |------|------|
+| `discover-new-v1.2.12.png` | 发现：新歌 / 新碟 |
+| `discover-playlists-v1.2.12.png` | 发现：推荐歌单 |
+| `discover-ranks-v1.2.12.png` | 发现：排行榜 |
 | `search-v1.2.9.png` | 搜索 |
-| `discover-v1.2.9.png` | 发现 |
+| `discover-v1.2.9.png` | 发现（旧版总览，可选） |
 | `download-v1.2.9.png` | 下载管理 |
 | `tag-editor-v1.2.9.png` | 标签编辑 |
 | `tag-manual-check-v1.2.9.png` | 手动检测 |
@@ -22,5 +25,3 @@
 | `backup-v1.2.8.png` | 账号备份 |
 | `player-sleep-v1.2.8.png` | 睡眠定时 |
 | `search-mobile.png` | 手机搜索 |
-
-旧版截图（v1.2.5 / 无版本号桌面图等）已删除，请勿再引用。

@@ -53,8 +53,11 @@ function onDocPointer(e) {
   if (el && !el.contains(e.target)) emit('close')
 }
 
-function onPanelAction() {
-  if (isNarrow.value && props.open) emit('close')
+function onPanelAction(e) {
+  if (!isNarrow.value || !props.open) return
+  // 下载音质菜单等需保持展开的区域
+  if (e.target?.closest?.('[data-keep-actions-open]')) return
+  emit('close')
 }
 
 onMounted(() => {
@@ -108,6 +111,7 @@ onUnmounted(() => {
 }
 .mobile-row-actions.narrow .actions-toggle.active {
   color: var(--accent);
-  background: var(--bg-hover);
+  border-color: var(--brand-border, var(--accent));
+  background: var(--accent-muted);
 }
 </style>

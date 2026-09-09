@@ -1,7 +1,7 @@
 import { getTrackFilePath } from './trackPath.js'
 import { stripStreamAuth } from './streamAuth.js'
 
-const PLAY_URL_TTL_MS = 25 * 60 * 1000
+const PLAY_URL_TTL_MS = 8 * 60 * 1000
 const MAX_ENTRIES = 80
 
 /** @type {Map<string, { url: string, expiresAt: number }>} */

@@ -1,52 +1,54 @@
 <template>
-  <div class="modal-overlay" @click.self="$emit('close')">
-    <div class="modal-card">
-      <div class="modal-head">
-        <h3>加入歌单</h3>
-        <button type="button" class="btn-ghost btn-sm" @click="$emit('close')">关闭</button>
+  <Teleport to="body">
+    <div class="modal-overlay" @click.self="$emit('close')">
+      <div class="modal-card">
+        <div class="modal-head">
+          <h3>加入歌单</h3>
+          <button type="button" class="btn-ghost btn-sm" @click="$emit('close')">关闭</button>
+        </div>
+
+        <p v-if="trackName" class="track-hint">「{{ trackName }}」</p>
+
+        <div v-if="!playlists.length" class="empty">
+          <p>暂无自定义歌单</p>
+          <button type="button" class="btn-primary btn-sm" @click="showCreate = true">创建歌单</button>
+        </div>
+        <div v-else class="playlist-pick-list">
+          <button
+            v-for="pl in playlists"
+            :key="pl.id"
+            type="button"
+            class="pick-item"
+            @click="pick(pl)"
+          >
+            <span class="pick-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 15V6"/>
+                <path d="M18.5 18a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z"/>
+                <path d="M12 12H3"/>
+                <path d="M16 6H3"/>
+                <path d="M12 18H3"/>
+              </svg>
+            </span>
+            <span class="pick-name">{{ pl.name }}</span>
+            <span class="pick-count">{{ pl.trackKeys.length }} 首</span>
+          </button>
+        </div>
+
+        <div v-if="playlists.length" class="modal-foot">
+          <button type="button" class="btn-ghost btn-sm" @click="showCreate = true">新建歌单</button>
+        </div>
       </div>
 
-      <p v-if="trackName" class="track-hint">「{{ trackName }}」</p>
-
-      <div v-if="!playlists.length" class="empty">
-        <p>暂无自定义歌单</p>
-        <button type="button" class="btn-primary btn-sm" @click="showCreate = true">创建歌单</button>
-      </div>
-      <div v-else class="playlist-pick-list">
-        <button
-          v-for="pl in playlists"
-          :key="pl.id"
-          type="button"
-          class="pick-item"
-          @click="pick(pl)"
-        >
-          <span class="pick-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M21 15V6"/>
-              <path d="M18.5 18a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z"/>
-              <path d="M12 12H3"/>
-              <path d="M16 6H3"/>
-              <path d="M12 18H3"/>
-            </svg>
-          </span>
-          <span class="pick-name">{{ pl.name }}</span>
-          <span class="pick-count">{{ pl.trackKeys.length }} 首</span>
-        </button>
-      </div>
-
-      <div v-if="playlists.length" class="modal-foot">
-        <button type="button" class="btn-ghost btn-sm" @click="showCreate = true">新建歌单</button>
-      </div>
+      <CreatePlaylistModal
+        v-if="showCreate"
+        :api="api"
+        @close="showCreate = false"
+        @created="onCreate"
+        @imported="onImported"
+      />
     </div>
-
-    <CreatePlaylistModal
-      v-if="showCreate"
-      :api="api"
-      @close="showCreate = false"
-      @created="onCreate"
-      @imported="onImported"
-    />
-  </div>
+  </Teleport>
 </template>
 
 <script setup>
@@ -103,12 +105,14 @@ function onImported({ playlist }) {
 .modal-overlay {
   position: fixed;
   inset: 0;
-  z-index: 1200;
+  /* 高于全屏播放器 (10000)，避免试听列表内打开被挡住 */
+  z-index: 11000;
   background: rgba(0, 0, 0, 0.55);
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 20px;
+  padding: max(12px, env(safe-area-inset-top, 0px)) max(12px, env(safe-area-inset-right, 0px)) max(12px, env(safe-area-inset-bottom, 0px)) max(12px, env(safe-area-inset-left, 0px));
 }
 .modal-card {
   width: min(420px, 100%);
@@ -195,5 +199,23 @@ function onImported({ playlist }) {
   margin-top: 14px;
   display: flex;
   justify-content: flex-end;
+}
+
+@media (max-width: 768px) {
+  .modal-card {
+    width: 100%;
+    max-height: min(86dvh, 640px);
+    border-radius: 16px;
+    padding: 16px;
+  }
+  .pick-item {
+    padding: 14px 12px;
+    min-height: 52px;
+  }
+  .pick-icon {
+    width: 38px;
+    height: 38px;
+  }
+  .pick-name { font-size: 15px; }
 }
 </style>

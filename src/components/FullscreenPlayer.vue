@@ -141,6 +141,41 @@
                 <line x1="7" y1="7" x2="7.01" y2="7"/>
               </svg>
             </button>
+            <button
+              class="fs-btn"
+              type="button"
+              title="加入歌单"
+              :disabled="!currentPlaying"
+              @click="openPickCurrentPlaylist"
+            >
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15V6"/><path d="M18.5 18a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z"/><path d="M12 12H3"/><path d="M16 6H3"/><path d="M12 18H3"/></svg>
+            </button>
+            <div v-if="canDownloadCurrent" class="fs-dl-wrap" data-fs-dl>
+              <button
+                class="fs-btn"
+                type="button"
+                title="下载"
+                @click.stop="toggleDownloadMenu($event)"
+              >
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                  <polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+                </svg>
+              </button>
+              <div v-if="downloadMenuOpen" class="quality-menu" :style="downloadMenuStyle" data-fs-dl @click.stop>
+                <div class="quality-menu-title">选择音质</div>
+                <template v-if="currentQualities.length">
+                  <button
+                    v-for="q in currentQualities"
+                    :key="q"
+                    type="button"
+                    class="quality-option"
+                    @click="downloadCurrent(q)"
+                  >{{ getQualityDisplay(q, currentPlaying?.types) }}</button>
+                </template>
+                <div v-else class="quality-empty">该曲暂无可用音质（音源未返回）</div>
+              </div>
+            </div>
             <button class="fs-btn" type="button" title="试听列表" :class="{ active: showQueuePanel }" @click="onOpenQueue">
               <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
                 <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/>
@@ -202,26 +237,36 @@
                 @dblclick="onPlayAt(i)"
               >
                 <span class="fs-queue-index">{{ i === currentQueueIndex && !isPaused ? '▶' : i + 1 }}</span>
-                <div class="fs-queue-info">
+                <div class="fs-queue-info" @click="onPlayAt(i)">
                   <div class="fs-queue-name">{{ cleanText(entry.item.name) }}</div>
                   <div class="fs-queue-meta">{{ formatArtists(entry.item.singer) }}</div>
                 </div>
-                <button
-                  class="fs-queue-play"
-                  type="button"
-                  :class="{ playing: i === currentQueueIndex && currentPlaying && !isPaused }"
-                  :title="i === currentQueueIndex && currentPlaying && !isPaused ? '暂停' : '播放'"
-                  @click.stop="onQueuePlayClick(i)"
-                >
-                  <svg v-if="i === currentQueueIndex && currentPlaying && !isPaused" viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
-                  <svg v-else viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><polygon points="7,3 21,12 7,21"/></svg>
-                </button>
-                <button class="fs-queue-remove" type="button" title="移除" @click.stop="removeFromQueue(i)">×</button>
+                <div class="fs-queue-actions-row">
+                  <button
+                    class="fs-queue-btn fs-queue-play"
+                    type="button"
+                    :class="{ playing: i === currentQueueIndex && currentPlaying && !isPaused }"
+                    :title="i === currentQueueIndex && currentPlaying && !isPaused ? '暂停' : '播放'"
+                    @click.stop="onQueuePlayClick(i)"
+                  >
+                    <svg v-if="i === currentQueueIndex && currentPlaying && !isPaused" viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+                    <svg v-else viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><polygon points="7,3 21,12 7,21"/></svg>
+                  </button>
+                  <button class="fs-queue-btn fs-queue-remove" type="button" title="移除" @click.stop="removeFromQueue(i)">×</button>
+                </div>
               </div>
             </div>
             <div v-else class="fs-queue-empty">列表为空</div>
           </div>
         </div>
+
+        <PickPlaylistModal
+          v-if="pickPlaylistTrack"
+          :track="pickPlaylistTrack.track"
+          :source="pickPlaylistTrack.source"
+          @close="pickPlaylistTrack = null"
+          @added="onAddedToPlaylist"
+        />
       </div>
     </Transition>
   </Teleport>
@@ -237,6 +282,7 @@ import {
   togglePause, seekTo, setVolume, toggleMute, fmtTime, playNext, playPrev, togglePlayMode,
   closeFullscreenPlayer, showQueuePanel, playTrackAt, removeFromQueue, clearQueue,
   resumeOrTogglePause, unlockAudioFromGesture, currentLocalTrackPath, tryFillCoverFromNetwork,
+  showPlayerNotice,
 } from '../stores/player.js'
 import { cleanText, formatArtists } from '../utils/text.js'
 import { openTagEditTrack } from '../utils/tagEdit.js'
@@ -245,6 +291,12 @@ import { isMobileUiContext } from '../utils/device.js'
 import { isAppIconUrl } from '../utils/appIcon.js'
 import SpectrumVisualizer from './SpectrumVisualizer.vue'
 import CoverArt from './CoverArt.vue'
+import PickPlaylistModal from './PickPlaylistModal.vue'
+import { api } from '../api.js'
+import { assertActiveSourceForDownload } from '../stores/downloadGuard.js'
+import { buildDownloadTask, getItemQualities } from '../utils/musicPayload.js'
+import { getQualityDisplay, getQualityLabel } from '../utils/quality.js'
+import { useQualityMenuPosition } from '../utils/qualityMenu.js'
 
 const lyricPanelRef = ref(null)
 const lyricListRef = ref(null)
@@ -252,6 +304,13 @@ const playerRootRef = ref(null)
 const isNativeFullscreen = ref(false)
 const mobileScreenExpanded = ref(false)
 const mobileLayoutTick = ref(0)
+const pickPlaylistTrack = ref(null)
+const downloadMenuOpen = ref(false)
+const {
+  menuStyle: downloadMenuStyle,
+  positionMenu: positionDownloadMenu,
+  clearMenuPosition: clearDownloadMenuPosition,
+} = useQualityMenuPosition()
 let mobileViewportMq = null
 
 const isMobileViewport = computed(() => {
@@ -270,6 +329,43 @@ const isFallbackCover = computed(() => !coverUrl.value || coverBroken.value)
 const volumePercent = computed(() => Math.round((volume.value || 0) * 100))
 
 const currentLocalPath = currentLocalTrackPath
+
+const canDownloadCurrent = computed(() => {
+  const t = currentPlaying.value
+  if (!t) return false
+  if (currentLocalPath.value) return false
+  return true
+})
+
+const currentQualities = computed(() => {
+  if (!currentPlaying.value) return []
+  return getItemQualities(currentPlaying.value)
+})
+
+function closeDownloadMenu() {
+  downloadMenuOpen.value = false
+  clearDownloadMenuPosition()
+}
+
+function toggleDownloadMenu(event) {
+  downloadMenuOpen.value = !downloadMenuOpen.value
+  if (downloadMenuOpen.value) positionDownloadMenu(event?.currentTarget, { zIndex: 10050 })
+  else clearDownloadMenuPosition()
+}
+
+async function downloadCurrent(quality) {
+  const item = currentPlaying.value
+  if (!item || currentLocalPath.value) return
+  closeDownloadMenu()
+  if (!(await assertActiveSourceForDownload())) return
+  const source = item.source || 'kw'
+  try {
+    await api.download.add([buildDownloadTask(item, source, quality)])
+    showPlayerNotice(`已添加下载: ${item.name || ''} (${getQualityLabel(quality, item.types)})`, 2500)
+  } catch (e) {
+    showPlayerNotice(e?.message || '下载失败', 3000)
+  }
+}
 
 const bgStyle = computed(() => {
   if (isFallbackCover.value) return {}
@@ -326,6 +422,13 @@ async function onNext() {
 
 function onOpenQueue() {
   showQueuePanel.value = !showQueuePanel.value
+  closeDownloadMenu()
+}
+
+function onFsDocClick(e) {
+  if (!downloadMenuOpen.value) return
+  if (e.target?.closest?.('[data-fs-dl]')) return
+  closeDownloadMenu()
 }
 
 function onOpenTagEdit() {
@@ -345,6 +448,24 @@ async function onQueuePlayClick(index) {
     return
   }
   await onPlayAt(index)
+}
+
+function openPickCurrentPlaylist() {
+  if (!currentPlaying.value) return
+  pickPlaylistTrack.value = {
+    track: {
+      ...currentPlaying.value,
+      source: currentPlaying.value.source,
+      localPath: currentPlaying.value.localPath,
+    },
+    source: currentPlaying.value.source || 'local',
+  }
+}
+
+function onAddedToPlaylist({ playlist, duplicate }) {
+  pickPlaylistTrack.value = null
+  if (duplicate) showPlayerNotice('歌曲已在歌单中', 2500)
+  else showPlayerNotice(`已加入歌单：${playlist?.name || ''}`, 2500)
 }
 
 function scrollActiveLyric() {
@@ -481,6 +602,7 @@ onMounted(() => {
   document.addEventListener('fullscreenchange', syncNativeFullscreenState)
   document.addEventListener('webkitfullscreenchange', syncNativeFullscreenState)
   document.addEventListener('keydown', onKeydown)
+  document.addEventListener('click', onFsDocClick)
 })
 
 onUnmounted(() => {
@@ -489,11 +611,15 @@ onUnmounted(() => {
   document.removeEventListener('fullscreenchange', syncNativeFullscreenState)
   document.removeEventListener('webkitfullscreenchange', syncNativeFullscreenState)
   document.removeEventListener('keydown', onKeydown)
+  document.removeEventListener('click', onFsDocClick)
+  clearDownloadMenuPosition()
   document.body.style.overflow = ''
   document.documentElement.classList.remove('player-fs-open')
   mobileScreenExpanded.value = false
   exitNativeFullscreen()
 })
+
+watch(currentPlaying, () => closeDownloadMenu())
 </script>
 
 <style scoped>
@@ -862,6 +988,43 @@ onUnmounted(() => {
 .fs-btn:hover:not(:disabled) { background: rgba(255, 255, 255, 0.12); }
 .fs-btn.active { background: rgba(255, 255, 255, 0.18); }
 
+.fs-dl-wrap {
+  position: relative;
+  display: inline-flex;
+}
+.quality-menu {
+  background: rgba(20, 22, 30, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 12px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+  padding: 6px 0;
+  min-width: 160px;
+}
+.quality-menu-title {
+  padding: 6px 12px 4px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.55);
+}
+.quality-option {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 12px;
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 13px;
+  cursor: pointer;
+}
+.quality-option:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+.quality-empty {
+  padding: 10px 12px;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.55);
+}
+
 .fs-queue-mask {
   position: absolute;
   inset: 0;
@@ -946,7 +1109,7 @@ onUnmounted(() => {
   flex-shrink: 0;
 }
 .fs-queue-item.active .fs-queue-index { color: #fff; }
-.fs-queue-info { flex: 1; min-width: 0; }
+.fs-queue-info { flex: 1; min-width: 0; cursor: pointer; }
 .fs-queue-name {
   font-size: 13px;
   overflow: hidden;
@@ -960,6 +1123,13 @@ onUnmounted(() => {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.fs-queue-actions-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.fs-queue-btn,
 .fs-queue-play,
 .fs-queue-remove {
   width: 32px;
@@ -976,6 +1146,11 @@ onUnmounted(() => {
   justify-content: center;
   line-height: 1;
   font-size: 18px;
+}
+.fs-queue-btn:hover,
+.fs-queue-play:hover,
+.fs-queue-remove:hover {
+  background: rgba(255, 255, 255, 0.16);
 }
 .fs-queue-play svg {
   display: block;
@@ -1115,6 +1290,22 @@ onUnmounted(() => {
   }
   .fs-queue-header {
     padding: 14px 16px 12px;
+  }
+  .fs-queue-item {
+    padding: 12px 12px;
+    gap: 8px;
+  }
+  .fs-queue-name {
+    font-size: 14px;
+  }
+  .fs-queue-meta {
+    font-size: 12px;
+  }
+  .fs-queue-btn,
+  .fs-queue-play,
+  .fs-queue-remove {
+    width: 36px;
+    height: 36px;
   }
 }
 

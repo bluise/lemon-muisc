@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div class="app">
     <div v-if="showAuthSplash" class="auth-splash" aria-busy="true">
       <img src="/icon.png" alt="" class="auth-splash-logo" />
@@ -21,7 +21,7 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
           <span>搜索</span>
         </router-link>
-        <router-link to="/discover" class="nav-item" active-class="active">
+        <router-link to="/discover" class="nav-item" :class="{ active: isDiscoverNav }" >
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
           <span>发现</span>
         </router-link>
@@ -336,7 +336,7 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
         <span>搜索</span>
       </router-link>
-      <router-link to="/discover" class="tab-item" active-class="active" @touchstart.passive="onTabPrefetch('/discover')" @mousedown="onTabPrefetch('/discover')">
+      <router-link to="/discover" class="tab-item" :class="{ active: isDiscoverNav }" @touchstart.passive="onTabPrefetch('/discover')" @mousedown="onTabPrefetch('/discover')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
         <span>发现</span>
       </router-link>
@@ -445,6 +445,7 @@ const showAppShell = computed(() => (
 ))
 const showAuthSplash = computed(() => !isPublicPage.value && !showAppShell.value)
 const isTagPage = computed(() => route.path === '/tag' || route.path.startsWith('/tag/'))
+const isDiscoverNav = computed(() => route.path === '/discover' || route.path.startsWith('/discover/'))
 const showRouteSkeleton = computed(() => isRouteLoading.value && isMobileUiContext(768))
 
 function onTabPrefetch(path) {

@@ -5,7 +5,7 @@ export function useQualityMenuPosition() {
   const menuStyle = ref({})
   const menuOpenUp = ref(false)
 
-  function positionMenu(anchorEl, { align = 'right' } = {}) {
+  function positionMenu(anchorEl, { align = 'right', zIndex = 80 } = {}) {
     if (!anchorEl) return
     nextTick(() => {
       const rect = anchorEl.getBoundingClientRect()
@@ -24,7 +24,7 @@ export function useQualityMenuPosition() {
       menuOpenUp.value = openUp
       const base = {
         position: 'fixed',
-        zIndex: 80,
+        zIndex,
         minWidth: '160px',
       }
       if (align === 'left') {

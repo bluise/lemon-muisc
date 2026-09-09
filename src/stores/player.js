@@ -1601,11 +1601,12 @@ async function resolvePlayUrl(item, source, quality = DEFAULT_PLAY_QUALITY, opti
   }
 
   const cached = getCachedPlayUrl(item, source, quality)
-  if (cached && !options.sourceApiId && !(options.skipSourceIds?.length)) return cached
+  if (cached && !options.refresh && !options.sourceApiId && !(options.skipSourceIds?.length)) return cached
 
   const payload = buildPlayPayload(item, source, quality)
   if (options.sourceApiId) payload.sourceApiId = options.sourceApiId
   if (options.skipSourceIds?.length) payload.skipSourceIds = options.skipSourceIds
+  if (options.refresh) payload.refresh = true
 
   try {
     const res = await api.play.getUrl(payload, { signal: options.signal })
@@ -1614,8 +1615,7 @@ async function resolvePlayUrl(item, source, quality = DEFAULT_PLAY_QUALITY, opti
     if (res.sourceInfo?.id) currentPlaySourceApiId = res.sourceInfo.id
     else if (options.sourceApiId) currentPlaySourceApiId = options.sourceApiId
     const url = res.url || ''
-    // 试听切换过程中不要把可能仍是预览的链写进缓存
-    if (url && !(options.skipSourceIds?.length)) setCachedPlayUrl(item, source, quality, url)
+    // 仅播放成功后再写入缓存（见 rememberLoadedPlayUrl），避免把失效链留下导致连点仍失败
     if (url && !(options.skipSourceIds?.length)) {
       currentPlayPlatform.value = String(source || item.source || '')
     }
@@ -1642,10 +1642,20 @@ async function resolvePlayUrl(item, source, quality = DEFAULT_PLAY_QUALITY, opti
 
 function canReuseLoadedAudio(url, item, source) {
   if (!audio || !hasMediaSrc || !url) return false
+  if (audio.error) return false
   if (!urlsMatch(audio.src, url)) return false
   if (!currentPlaying.value) return false
   return getTrackKey(currentPlaying.value, currentPlaying.value.source)
     === getTrackKey(item, source)
+}
+
+/** 播放失败后重建管道：坏链缓存 + 卡死的 Audio 元素（刷新页面才好的主因） */
+function recoverPlaybackPipeline(trackKey, item, source, quality = DEFAULT_PLAY_QUALITY) {
+  clearCachedPlayUrl(item, source, quality)
+  if (trackKey) destroyMediaAudioCacheEntry(trackKey)
+  hasMediaSrc = false
+  recreateMainAudioElement()
+  applyAudioOutput()
 }
 
 async function startPlaybackFromUrl(url, { resumeTime = 0, item, source, isLocal = false } = {}) {
@@ -1654,11 +1664,17 @@ async function startPlaybackFromUrl(url, { resumeTime = 0, item, source, isLocal
     else audio = createAudioElement()
   }
 
+  // 出错后的 Audio 再设同一 src 常常不会重新加载，必须换新元素
+  if (audio.error) {
+    recreateMainAudioElement()
+    applyAudioOutput()
+  }
+
   if (!resumeTime) currentTime.value = 0
   duration.value = 0
   if (item) applyDurationFallback(item)
   const authedUrl = withStreamAuth(url)
-  if (!urlsMatch(audio.src, url)) {
+  if (!urlsMatch(audio.src, url) || audio.error) {
     invalidatePlaybackGraph()
     resetAudioBeforeLoad(audio)
   }
@@ -1836,30 +1852,33 @@ export async function playTrackAt(index, { fromHistory = false, resumeTime = 0 }
   const isLocal = isLocalTrack(item, source)
   currentPlayPlatform.value = isLocal ? '' : String(source || item.source || '')
   const quality = DEFAULT_PLAY_QUALITY
-  const maxAttempts = isLocal ? 2 : 1
+  // 在线链容易过期；失败后清缓存 + 重建 Audio，再取新链
+  const maxAttempts = 2
+  const audioBrokenAtStart = Boolean(audio?.error)
 
   try {
     let lastError = null
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       if (intent !== playIntentToken) return
-      if (attempt > 0) {
-        clearCachedPlayUrl(item, source, quality)
-        destroyMediaAudioCacheEntry(trackKey)
-        if (audio) resetAudioBeforeLoad(audio)
+      if (attempt > 0 || audioBrokenAtStart) {
+        recoverPlaybackPipeline(trackKey, item, source, quality)
       }
 
       try {
-        const cachedUrl = attempt === 0 ? getCachedPlayUrl(item, source, quality) : ''
+        // 出错过的会话不要再用本地/内存缓存链，强制向服务端刷新
+        const forceRefresh = attempt > 0 || audioBrokenAtStart
+        const cachedUrl = forceRefresh ? '' : getCachedPlayUrl(item, source, quality)
         const cachedMedia = cachedUrl ? takeMediaAudioCache(trackKey, cachedUrl) : null
         if (cachedMedia) {
           await activateCachedAudio(cachedMedia, { resumeTime })
           rememberLoadedPlayUrl(item, source, cachedUrl, quality)
-        } else if (attempt === 0 && canReuseLoadedAudio(cachedUrl, item, source)) {
+        } else if (!forceRefresh && canReuseLoadedAudio(cachedUrl, item, source)) {
           await startPlaybackFromUrl(cachedUrl, { resumeTime, item, source, isLocal })
         } else {
           const url = cachedUrl || await resolvePlayUrl(item, source, quality, {
             signal: playUrlController.signal,
             intent,
+            refresh: forceRefresh,
           })
           if (!url) {
             if (intent !== playIntentToken) return
@@ -1898,7 +1917,9 @@ export async function playTrackAt(index, { fromHistory = false, resumeTime = 0 }
       } catch (e) {
         if (e.aborted || intent !== playIntentToken) throw e
         lastError = e
-        if (attempt + 1 >= maxAttempts) throw e
+        // 每次失败都清掉坏状态，避免下一轮 / 下一次点击继续踩坑
+        recoverPlaybackPipeline(trackKey, item, source, quality)
+        if (attempt + 1 >= maxAttempts || !isRetryablePlayError(e)) throw e
       }
     }
     if (lastError) throw lastError
@@ -1907,6 +1928,10 @@ export async function playTrackAt(index, { fromHistory = false, resumeTime = 0 }
       if (e.aborted) return
       endPlaybackBuffer()
       isPaused.value = true
+      // 最终失败也重建，保证用户再点不会卡在坏 Audio / 坏链
+      if (isRetryablePlayError(e)) {
+        recoverPlaybackPipeline(trackKey, item, source, quality)
+      }
       const message = formatPlayClientError(e)
       playerError.value = message
       if (!message) return
@@ -1926,13 +1951,21 @@ const AUDIO_ELEMENT_ERROR_TEXT = {
   1: '音频加载被中止',
   2: '网络异常，无法加载音频',
   3: '音频解码失败，文件可能已损坏',
-  4: '浏览器无法播放该音频格式',
+  // 浏览器对 403/过期链/空响应也常报 code=4，不完全是真格式问题
+  4: '播放链接失效或浏览器无法解码该音频，请重试',
 }
 
 function getAudioElementError(el = audio) {
   const code = el?.error?.code
   if (code && AUDIO_ELEMENT_ERROR_TEXT[code]) return AUDIO_ELEMENT_ERROR_TEXT[code]
   return ''
+}
+
+function isRetryablePlayError(error) {
+  const text = String(error?.message || error || '')
+  if (error?.aborted || isBenignPlayInterrupt(error)) return false
+  return /播放链接失效|无法播放该音频|无法解码|音频加载超时|网络异常|音频解码失败|音频加载失败|获取播放链接失败/i.test(text)
+    || /NotSupportedError|no supported sources|MEDIA_ERR_SRC_NOT_SUPPORTED/i.test(text)
 }
 
 function isBenignPlayInterrupt(error) {

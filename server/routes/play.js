@@ -10,7 +10,7 @@ import { resolveCoverUrl } from '../utils/cover.js'
 import { detectImageMime, fetchPicBuffer } from '../utils/fetchPic.js'
 import { isAllowedMediaPath } from '../utils/filePaths.js'
 import { formatUserError } from '../utils/userError.js'
-import { buildPlayUrlCacheKey, getCachedPlayUrl, getOrFetchPlayUrl } from '../utils/playUrlCache.js'
+import { buildPlayUrlCacheKey, getCachedPlayUrl, getOrFetchPlayUrl, clearCachedPlayUrl } from '../utils/playUrlCache.js'
 import { createLimiter, withTimeout } from '../utils/asyncLimit.js'
 import { getDB } from '../db.js'
 import { buildSourceFallbackOffer, buildSourceInfoPayload, getSourceFallbackMode } from '../utils/sourceFallback.js'
@@ -97,7 +97,7 @@ function resolveLocalFilePath(body = {}) {
 
 playRouter.post('/url', async (req, res) => {
   try {
-    const { songId, source, quality, sourceApiId, skipSourceIds } = req.body
+    const { songId, source, quality, sourceApiId, skipSourceIds, refresh } = req.body
     const localFilePath = resolveLocalFilePath(req.body)
 
     // 本地文件：返回可流式播放的同源 URL
@@ -125,7 +125,10 @@ playRouter.post('/url', async (req, res) => {
     const type = quality || req.body.quality || '128k'
     const musicInfo = buildMusicInfo({ ...req.body, source, quality: type })
     const cacheKey = buildPlayUrlCacheKey(source, musicInfo.songId, type)
-    const bypassCache = Boolean(sourceApiId) || (Array.isArray(skipSourceIds) && skipSourceIds.length > 0)
+    const bypassCache = Boolean(refresh)
+      || Boolean(sourceApiId)
+      || (Array.isArray(skipSourceIds) && skipSourceIds.length > 0)
+    if (refresh) clearCachedPlayUrl(cacheKey)
     const cached = bypassCache ? null : getCachedPlayUrl(cacheKey)
     if (cached) {
       return res.json({ ok: true, url: signPlayStreamUrl(cached, req), cached: true })
