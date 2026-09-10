@@ -26,6 +26,7 @@ function buildFileStub(fp) {
     parsedArtist: parsed.artist,
     title: parsed.title,
     artist: parsed.artist,
+    albumArtist: '',
     album: '',
     year: '',
     genre: '',

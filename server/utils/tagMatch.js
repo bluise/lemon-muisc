@@ -4,6 +4,7 @@ import { parseFilename, scoreMatch } from './filenameParse.js'
 import { fetchPicBuffer, detectImageMime } from './fetchPic.js'
 import { fetchTrackLyric } from './trackMeta.js'
 import { resolveCoverUrl } from './cover.js'
+import { joinArtists } from './artistTag.js'
 
 const SOURCE_MAP = {
   wy: 'wy',
@@ -96,6 +97,8 @@ function mergeAlbumExtras(extras, info = {}) {
   const comment = truncateComment(info.desc)
   if (comment) extras.comment = comment
   if (info.name) extras.album = cleanHtml(info.name)
+  // 专辑详情的 author = Album Artist（整张专辑署名）
+  if (info.author) extras.albumArtist = joinArtists(cleanHtml(info.author))
   if (info.img && !extras.picUrl) extras.picUrl = info.img
   if (!extras.genre && info.language) {
     const lang = normalizeGenre(info.language)
@@ -310,11 +313,12 @@ export async function fetchMatchMeta(match, source, fields = null) {
   const wantTags = !fields?.length
     || fields.includes('all')
     || fields.includes('tags')
-    || ['title', 'artist', 'album', 'year', 'genre', 'comment'].some((key) => fields.includes(key))
+    || ['title', 'artist', 'albumArtist', 'album', 'year', 'genre', 'comment'].some((key) => fields.includes(key))
 
   const meta = {
     title: cleanHtml(match.name || ''),
-    artist: cleanHtml(match.singer || ''),
+    artist: joinArtists(cleanHtml(match.singer || '')),
+    albumArtist: '',
     album: cleanHtml(match.album || match.albumName || ''),
     year: '',
     genre: '',
@@ -329,12 +333,15 @@ export async function fetchMatchMeta(match, source, fields = null) {
   if (wantTags) {
     const extras = await fetchTagTextExtras(match, sdkSource)
     if (extras.title) meta.title = extras.title
-    if (extras.artist) meta.artist = extras.artist
+    if (extras.artist) meta.artist = joinArtists(extras.artist)
+    if (extras.albumArtist) meta.albumArtist = joinArtists(extras.albumArtist)
     if (extras.album) meta.album = extras.album
     if (extras.year) meta.year = extras.year
     if (extras.genre) meta.genre = extras.genre
     if (extras.comment) meta.comment = extras.comment
     if (extras.picUrl) meta.picUrl = extras.picUrl
+    // 专辑接口未给艺人时，用曲目歌手兜底（常见单人专辑）
+    if (!meta.albumArtist && meta.artist) meta.albumArtist = meta.artist
   }
 
   if (wantLyric) {

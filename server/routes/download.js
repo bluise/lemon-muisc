@@ -1572,6 +1572,8 @@ async function writeMetaIfNeeded(task, meta, filePath, ext, settings) {
     const metaData = {
       title: task.name || '',
       artist: joinArtists(task.singer || ''),
+      // 无单独专辑艺人时用歌手，便于音乐库按专辑归类
+      albumArtist: joinArtists(task.albumArtist || task.singer || ''),
       album: task.album || '',
     }
     if (wantEmbedPic && picBuf) metaData.pic = picBuf

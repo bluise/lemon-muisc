@@ -51,8 +51,8 @@
               <span class="tree-folder" @click="selectFolder(row.path)">
                 <svg
                   viewBox="0 0 24 24"
-                  width="14"
-                  height="14"
+                  width="19"
+                  height="19"
                   fill="none"
                   stroke="currentColor"
                   stroke-width="2"
@@ -427,6 +427,15 @@
             </span>
             <span class="field-hint">多歌手用「 / 」分隔；FLAC 写入多值，其它格式写展示串</span>
           </label>
+          <label>
+            <span class="field-label-row">专辑艺术家</span>
+            <input
+              v-model="editForm.albumArtist"
+              placeholder="整张专辑署名，如：周杰伦 或 Various Artists"
+              @input="markModified"
+            />
+            <span class="field-hint">可与「歌手」不同；合辑常用 Various Artists / 群星</span>
+          </label>
           <label :class="{ 'field-suspect': isFieldSuspect('album') }">
             <span class="field-label-row">
               专辑
@@ -564,6 +573,7 @@
             <div class="preview-info">
               <p><strong>标题</strong> {{ fetchPreviewMeta.title || fetchPreview?.name || '-' }}</p>
               <p><strong>歌手</strong> {{ fetchPreviewMeta.artist || fetchPreview?.singer || '-' }}</p>
+              <p><strong>专辑艺术家</strong> {{ fetchPreviewMeta.albumArtist || '-' }}</p>
               <p><strong>专辑</strong> {{ fetchPreviewMeta.album || '-' }}</p>
               <p v-if="fetchIntent !== 'cover' && fetchIntent !== 'lyric' || fetchPreviewMeta.year">
                 <strong>年份</strong> {{ fetchPreviewMeta.year || '-' }}
@@ -863,7 +873,7 @@ const canConfirmFetch = computed(() => {
   if (fetchIntent.value === 'lyric') {
     return Boolean(meta.lyric)
   }
-  return Boolean(meta.title || meta.artist || meta.album || meta.year || meta.genre || meta.comment)
+  return Boolean(meta.title || meta.artist || meta.albumArtist || meta.album || meta.year || meta.genre || meta.comment)
 })
 const editPanelTitle = computed(() => {
   if (loadingDetail.value) return '读取文件信息'
@@ -880,6 +890,7 @@ function refreshEditFormFromFile() {
   editForm.value = {
     title: f.title || '',
     artist: f.artist || '',
+    albumArtist: f.albumArtist || '',
     album: f.album || '',
     year: f.year || '',
     genre: f.genre || '',
@@ -1241,6 +1252,7 @@ async function openEdit(f) {
     editForm.value = reactive({
       title: f.title || f.parsedTitle || '',
       artist: f.artist || f.parsedArtist || '',
+      albumArtist: f.albumArtist || '',
       album: f.album || '',
       year: f.year ? String(f.year) : '',
       genre: f.genre || '',
@@ -1257,6 +1269,7 @@ async function openEdit(f) {
   editForm.value = reactive({
     title: f.title || f.parsedTitle || '',
     artist: f.artist || f.parsedArtist || '',
+    albumArtist: f.albumArtist || '',
     album: f.album || '',
     year: f.year ? String(f.year) : '',
     genre: f.genre || '',
@@ -1274,6 +1287,7 @@ async function openEdit(f) {
       Object.assign(f, {
         title: meta.title || f.title,
         artist: meta.artist || f.artist,
+        albumArtist: meta.albumArtist || f.albumArtist,
         album: meta.album || f.album,
         year: meta.year || f.year,
         genre: meta.genre || f.genre,
@@ -1287,6 +1301,7 @@ async function openEdit(f) {
       editForm.value = reactive({
         title: f.title || f.parsedTitle || '',
         artist: f.artist || f.parsedArtist || '',
+        albumArtist: f.albumArtist || '',
         album: f.album || '',
         year: f.year ? String(f.year) : '',
         genre: f.genre || '',
@@ -1367,7 +1382,7 @@ async function applyAllCheckSuggestions() {
   tagCheckApplying.value = true
   try {
     const res = await api.tag.matchApply(match, fetchSource.value, [
-      'title', 'artist', 'album', 'year', 'genre', 'comment', 'cover', 'lyric',
+      'title', 'artist', 'albumArtist', 'album', 'year', 'genre', 'comment', 'cover', 'lyric',
     ])
     const meta = res.data || {}
 
@@ -1375,6 +1390,7 @@ async function applyAllCheckSuggestions() {
     else if (tagCheckResult.value.suggested.title) editForm.value.title = tagCheckResult.value.suggested.title
     if (meta.artist) editForm.value.artist = meta.artist
     else if (tagCheckResult.value.suggested.artist) editForm.value.artist = tagCheckResult.value.suggested.artist
+    if (meta.albumArtist) editForm.value.albumArtist = meta.albumArtist
     if (meta.album) editForm.value.album = meta.album
     else if (tagCheckResult.value.suggested.album) editForm.value.album = tagCheckResult.value.suggested.album
     if (meta.year) editForm.value.year = String(meta.year)
@@ -1408,6 +1424,7 @@ async function applyAllCheckSuggestions() {
       f._tagCheckResult = tagCheckResult.value
       f.title = editForm.value.title
       f.artist = editForm.value.artist
+      f.albumArtist = editForm.value.albumArtist
       f.album = editForm.value.album
       if (editForm.value.pictureBase64 || editForm.value.picUrl) {
         f.hasPicture = true
@@ -1613,6 +1630,7 @@ function buildMetaFromForm() {
   const m = {
     title: editForm.value.title,
     artist: editForm.value.artist,
+    albumArtist: editForm.value.albumArtist,
     album: editForm.value.album,
     year: editForm.value.year,
     genre: editForm.value.genre,
@@ -1627,6 +1645,7 @@ function buildMetaFromForm() {
 function applyMetaToFile(f, meta) {
   if (meta.title) f.title = meta.title
   if (meta.artist) f.artist = meta.artist
+  if (meta.albumArtist != null) f.albumArtist = meta.albumArtist
   if (meta.album) f.album = meta.album
   if (meta.year) f.year = meta.year
   if (meta.genre) f.genre = meta.genre
@@ -1763,6 +1782,7 @@ async function saveAll() {
       const meta = {
         title: f.title,
         artist: f.artist,
+        albumArtist: f.albumArtist,
         album: f.album,
         year: f.year,
         genre: f.genre,
@@ -1858,9 +1878,9 @@ async function doFetchSearch() {
 }
 
 function fetchFieldsForIntent(intent) {
-  if (intent === 'cover') return ['cover', 'title', 'artist', 'album', 'year', 'genre', 'comment']
-  if (intent === 'lyric') return ['lyric', 'title', 'artist', 'album', 'year', 'genre', 'comment']
-  return ['title', 'artist', 'album', 'year', 'genre', 'comment']
+  if (intent === 'cover') return ['cover', 'title', 'artist', 'albumArtist', 'album', 'year', 'genre', 'comment']
+  if (intent === 'lyric') return ['lyric', 'title', 'artist', 'albumArtist', 'album', 'year', 'genre', 'comment']
+  return ['title', 'artist', 'albumArtist', 'album', 'year', 'genre', 'comment']
 }
 
 async function previewFetchItem(item) {
@@ -1878,6 +1898,7 @@ function applyFetchedMetaToForm(meta) {
   if (!meta || !editForm.value) return
   if (meta.title) editForm.value.title = meta.title
   if (meta.artist) editForm.value.artist = meta.artist
+  if (meta.albumArtist) editForm.value.albumArtist = meta.albumArtist
   if (meta.album) editForm.value.album = meta.album
   if (meta.year) editForm.value.year = String(meta.year)
   if (meta.genre) editForm.value.genre = meta.genre
@@ -2233,7 +2254,7 @@ function showToast(text, type = 'info') {
 .tree-label {
   flex: 1;
   min-width: 0;
-  font-size: 12px;
+  font-size: 14.5px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

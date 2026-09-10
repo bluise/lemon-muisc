@@ -67,6 +67,7 @@ export function applyMatchMetaToFile(file, meta) {
   if (!file || !meta) return
   if (meta.title) file.title = meta.title
   if (meta.artist) file.artist = meta.artist
+  if (meta.albumArtist) file.albumArtist = meta.albumArtist
   if (meta.album) file.album = meta.album
   if (meta.year) file.year = meta.year
   if (meta.genre) file.genre = meta.genre
@@ -103,6 +104,7 @@ function buildWriteMeta(meta) {
   return {
     title: meta.title,
     artist: meta.artist,
+    albumArtist: meta.albumArtist,
     album: meta.album,
     year: meta.year,
     genre: meta.genre,
@@ -212,6 +214,7 @@ export async function startTagMatchBatch(targets, source) {
               fileName: sel.fileName,
               title: meta.title,
               artist: meta.artist,
+              albumArtist: meta.albumArtist,
               album: meta.album,
               year: meta.year,
               genre: meta.genre,

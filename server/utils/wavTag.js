@@ -35,7 +35,7 @@ export function writeWavMeta(filePath, meta, { decodePicInput, atomicReplaceFile
   const picBuf = decodePicInput ? decodePicInput(meta.pic) : null
   const clearPic = meta.clearPicture === true || meta.pic === ''
   const wantId3 = meta.lyric != null || picBuf || clearPic || meta.title != null || meta.artist != null
-    || meta.album != null || meta.year != null || meta.genre != null
+    || meta.albumArtist != null || meta.album != null || meta.year != null || meta.genre != null
 
   let id3Chunk = null
   if (wantId3) {
@@ -139,6 +139,7 @@ function buildWavId3Chunk(meta, picBuf, clearPic) {
   const tags = {}
   if (meta.title != null) tags.title = meta.title
   if (meta.artist != null) tags.artist = normalizeArtistForWrite(meta.artist).display
+  if (meta.albumArtist != null) tags.performerInfo = normalizeArtistForWrite(meta.albumArtist).display
   if (meta.album != null) tags.album = meta.album
   if (meta.year != null) tags.year = String(meta.year)
   if (meta.genre != null) tags.genre = meta.genre

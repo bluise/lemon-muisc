@@ -8,8 +8,11 @@
         :class="{
           'mobile-screen-expanded': isScreenExpanded,
           'fs-has-sheet': showQueuePanel || showTagEditModal,
+          'fs-chrome-hidden': chromeHidden,
         }"
         @click.self="closeFullscreenPlayer"
+        @pointermove="onFsPointerActivity"
+        @pointerdown="onFsPointerActivity"
       >
         <div class="fs-bg" :style="bgStyle"></div>
         <div class="fs-spectrum">
@@ -20,7 +23,7 @@
           />
         </div>
 
-        <div class="fs-top-left">
+        <div class="fs-top-left fs-chrome">
           <button
             class="fs-screen-full"
             type="button"
@@ -38,7 +41,7 @@
           </button>
         </div>
 
-        <button class="fs-close" type="button" title="关闭" @click="closeFullscreenPlayer">
+        <button class="fs-close fs-chrome" type="button" title="关闭" @click="closeFullscreenPlayer">
           <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.2">
             <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
           </svg>
@@ -84,7 +87,7 @@
           </div>
         </div>
 
-        <div class="fs-controls">
+        <div class="fs-controls fs-chrome">
           <div class="fs-progress">
             <span class="fs-time">{{ fmtTime(currentTime) }}</span>
             <input
@@ -129,59 +132,111 @@
             <button class="fs-btn" type="button" title="下一曲" :disabled="!playQueue.length" @click="onNext">
               <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><polygon points="5,4 15,12 5,20"/><line x1="19" y1="4" x2="19" y2="20" stroke="currentColor" stroke-width="2"/></svg>
             </button>
-            <button
-              v-if="currentLocalTrackPath"
-              class="fs-btn"
-              type="button"
-              title="标签编辑"
-              @click="onOpenTagEdit"
-            >
-              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/>
-                <line x1="7" y1="7" x2="7.01" y2="7"/>
-              </svg>
-            </button>
-            <button
-              class="fs-btn"
-              type="button"
-              title="加入歌单"
-              :disabled="!currentPlaying"
-              @click="openPickCurrentPlaylist"
-            >
-              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15V6"/><path d="M18.5 18a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z"/><path d="M12 12H3"/><path d="M16 6H3"/><path d="M12 18H3"/></svg>
-            </button>
-            <div v-if="canDownloadCurrent" class="fs-dl-wrap" data-fs-dl>
+
+            <!-- 桌面：次要操作平铺；手机：收进「更多」，保证底栏单行 -->
+            <template v-if="!isMobileViewport">
+              <button
+                v-if="currentLocalTrackPath"
+                class="fs-btn"
+                type="button"
+                title="标签编辑"
+                @click="onOpenTagEdit"
+              >
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/>
+                  <line x1="7" y1="7" x2="7.01" y2="7"/>
+                </svg>
+              </button>
               <button
                 class="fs-btn"
                 type="button"
-                title="下载"
-                @click.stop="toggleDownloadMenu($event)"
+                title="加入歌单"
+                :disabled="!currentPlaying"
+                @click="openPickCurrentPlaylist"
               >
-                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                  <polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
-                </svg>
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15V6"/><path d="M18.5 18a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z"/><path d="M12 12H3"/><path d="M16 6H3"/><path d="M12 18H3"/></svg>
               </button>
-              <div v-if="downloadMenuOpen" class="quality-menu" :style="downloadMenuStyle" data-fs-dl @click.stop>
-                <div class="quality-menu-title">选择音质</div>
-                <template v-if="currentQualities.length">
-                  <button
-                    v-for="q in currentQualities"
-                    :key="q"
-                    type="button"
-                    class="quality-option"
-                    @click="downloadCurrent(q)"
-                  >{{ getQualityDisplay(q, currentPlaying?.types) }}</button>
-                </template>
-                <div v-else class="quality-empty">该曲暂无可用音质（音源未返回）</div>
+              <div v-if="canDownloadCurrent" class="fs-dl-wrap" data-fs-dl>
+                <button
+                  class="fs-btn"
+                  type="button"
+                  title="下载"
+                  @click.stop="toggleDownloadMenu($event)"
+                >
+                  <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                    <polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+                  </svg>
+                </button>
+                <div v-if="downloadMenuOpen" class="quality-menu" :style="downloadMenuStyle" data-fs-dl @click.stop>
+                  <div class="quality-menu-title">选择音质</div>
+                  <template v-if="currentQualities.length">
+                    <button
+                      v-for="q in currentQualities"
+                      :key="q"
+                      type="button"
+                      class="quality-option"
+                      @click="downloadCurrent(q)"
+                    >{{ getQualityDisplay(q, currentPlaying?.types) }}</button>
+                  </template>
+                  <div v-else class="quality-empty">该曲暂无可用音质（音源未返回）</div>
+                </div>
               </div>
-            </div>
+            </template>
+
             <button class="fs-btn" type="button" title="试听列表" :class="{ active: showQueuePanel }" @click="onOpenQueue">
               <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
                 <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/>
                 <circle cx="4" cy="6" r="1" fill="currentColor"/><circle cx="4" cy="12" r="1" fill="currentColor"/><circle cx="4" cy="18" r="1" fill="currentColor"/>
               </svg>
             </button>
+
+            <div v-if="isMobileViewport" class="fs-more-wrap" data-fs-more>
+              <button
+                class="fs-btn"
+                type="button"
+                title="更多"
+                :class="{ active: moreMenuOpen }"
+                @click.stop="toggleMoreMenu"
+              >
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+                  <circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/>
+                </svg>
+              </button>
+              <div v-if="moreMenuOpen" class="fs-more-menu" @click.stop>
+                <button
+                  v-if="currentLocalTrackPath"
+                  type="button"
+                  class="fs-more-item"
+                  @click="onMoreTagEdit"
+                >标签编辑</button>
+                <button
+                  type="button"
+                  class="fs-more-item"
+                  :disabled="!currentPlaying"
+                  @click="onMorePickPlaylist"
+                >加入歌单</button>
+                <button
+                  v-if="canDownloadCurrent"
+                  type="button"
+                  class="fs-more-item"
+                  @click="onMoreDownload"
+                >下载</button>
+                <div v-if="moreDownloadOpen" class="fs-more-qualities" data-fs-dl>
+                  <div class="quality-menu-title">选择音质</div>
+                  <template v-if="currentQualities.length">
+                    <button
+                      v-for="q in currentQualities"
+                      :key="q"
+                      type="button"
+                      class="quality-option"
+                      @click="downloadCurrent(q)"
+                    >{{ getQualityDisplay(q, currentPlaying?.types) }}</button>
+                  </template>
+                  <div v-else class="quality-empty">该曲暂无可用音质（音源未返回）</div>
+                </div>
+              </div>
+            </div>
 
             <div class="fs-volume" @wheel.prevent="onVolumeWheel">
               <button
@@ -306,6 +361,13 @@ const mobileScreenExpanded = ref(false)
 const mobileLayoutTick = ref(0)
 const pickPlaylistTrack = ref(null)
 const downloadMenuOpen = ref(false)
+const moreMenuOpen = ref(false)
+const moreDownloadOpen = ref(false)
+/** 桌面端沉浸全屏：空闲后隐藏顶栏/底栏控件 */
+const chromeHidden = ref(false)
+const CONTROLS_IDLE_MS = 3200
+let chromeIdleTimer = null
+let lastPointerStamp = 0
 const {
   menuStyle: downloadMenuStyle,
   positionMenu: positionDownloadMenu,
@@ -319,6 +381,61 @@ const isMobileViewport = computed(() => {
 })
 
 const isScreenExpanded = computed(() => isNativeFullscreen.value || mobileScreenExpanded.value)
+
+const desktopChromeAutoHide = computed(() => (
+  showFullscreenPlayer.value
+  && !isMobileViewport.value
+  && isNativeFullscreen.value
+))
+
+function clearChromeIdleTimer() {
+  if (chromeIdleTimer != null) {
+    clearTimeout(chromeIdleTimer)
+    chromeIdleTimer = null
+  }
+}
+
+function scheduleChromeHide() {
+  clearChromeIdleTimer()
+  if (!desktopChromeAutoHide.value) {
+    chromeHidden.value = false
+    return
+  }
+  // 暂停、弹层打开时保持控件可见，方便操作
+  if (isPaused.value || showQueuePanel.value || showTagEditModal.value || downloadMenuOpen.value || pickPlaylistTrack.value) {
+    chromeHidden.value = false
+    return
+  }
+  chromeIdleTimer = setTimeout(() => {
+    if (!desktopChromeAutoHide.value) return
+    if (isPaused.value || showQueuePanel.value || showTagEditModal.value || downloadMenuOpen.value || pickPlaylistTrack.value) {
+      chromeHidden.value = false
+      return
+    }
+    chromeHidden.value = true
+  }, CONTROLS_IDLE_MS)
+}
+
+function revealChrome() {
+  chromeHidden.value = false
+  scheduleChromeHide()
+}
+
+function onFsPointerActivity() {
+  if (!desktopChromeAutoHide.value) return
+  const now = Date.now()
+  // 节流：播放时 pointermove 很密，避免每帧重置定时器开销
+  if (chromeHidden.value || now - lastPointerStamp > 120) {
+    lastPointerStamp = now
+    revealChrome()
+  }
+}
+
+function resetChromeIdleState() {
+  clearChromeIdleTimer()
+  chromeHidden.value = false
+  if (desktopChromeAutoHide.value) scheduleChromeHide()
+}
 
 /** @type {import('vue').Ref<(HTMLElement | null)[]>} */
 const lyricLineEls = ref([])
@@ -347,16 +464,44 @@ function closeDownloadMenu() {
   clearDownloadMenuPosition()
 }
 
+function closeMoreMenu() {
+  moreMenuOpen.value = false
+  moreDownloadOpen.value = false
+}
+
+function toggleMoreMenu() {
+  moreMenuOpen.value = !moreMenuOpen.value
+  moreDownloadOpen.value = false
+  if (moreMenuOpen.value) closeDownloadMenu()
+}
+
+function onMoreTagEdit() {
+  closeMoreMenu()
+  onOpenTagEdit()
+}
+
+function onMorePickPlaylist() {
+  closeMoreMenu()
+  openPickCurrentPlaylist()
+}
+
+function onMoreDownload() {
+  moreDownloadOpen.value = !moreDownloadOpen.value
+}
+
 function toggleDownloadMenu(event) {
   downloadMenuOpen.value = !downloadMenuOpen.value
-  if (downloadMenuOpen.value) positionDownloadMenu(event?.currentTarget, { zIndex: 10050, preferUp: true })
-  else clearDownloadMenuPosition()
+  if (downloadMenuOpen.value) {
+    closeMoreMenu()
+    positionDownloadMenu(event?.currentTarget, { zIndex: 10050, preferUp: true })
+  } else clearDownloadMenuPosition()
 }
 
 async function downloadCurrent(quality) {
   const item = currentPlaying.value
   if (!item || currentLocalPath.value) return
   closeDownloadMenu()
+  closeMoreMenu()
   if (!(await assertActiveSourceForDownload())) return
   const source = item.source || 'kw'
   try {
@@ -423,12 +568,12 @@ async function onNext() {
 function onOpenQueue() {
   showQueuePanel.value = !showQueuePanel.value
   closeDownloadMenu()
+  closeMoreMenu()
 }
 
 function onFsDocClick(e) {
-  if (!downloadMenuOpen.value) return
-  if (e.target?.closest?.('[data-fs-dl]')) return
-  closeDownloadMenu()
+  if (moreMenuOpen.value && !e.target?.closest?.('[data-fs-more]')) closeMoreMenu()
+  if (downloadMenuOpen.value && !e.target?.closest?.('[data-fs-dl]')) closeDownloadMenu()
 }
 
 function onOpenTagEdit() {
@@ -546,6 +691,7 @@ function updateMobileViewport() {
 
 function onKeydown(e) {
   if (!showFullscreenPlayer.value) return
+  if (desktopChromeAutoHide.value) revealChrome()
   if (e.key === 'Escape') {
     if (isScreenExpanded.value) {
       collapseScreenExpand()
@@ -587,12 +733,26 @@ watch(showFullscreenPlayer, async (open) => {
     await nextTick()
     updateMobileViewport()
     scrollActiveLyric()
+    resetChromeIdleState()
     return
   }
+  resetChromeIdleState()
+  clearChromeIdleTimer()
+  chromeHidden.value = false
   mobileScreenExpanded.value = false
+  closeMoreMenu()
+  closeDownloadMenu()
   document.documentElement.classList.remove('player-fs-open')
   await exitNativeFullscreen()
 })
+
+watch(
+  [isNativeFullscreen, isPaused, showQueuePanel, showTagEditModal, downloadMenuOpen, moreMenuOpen, pickPlaylistTrack, isMobileViewport],
+  () => {
+    if (!showFullscreenPlayer.value) return
+    resetChromeIdleState()
+  },
+)
 
 onMounted(() => {
   mobileViewportMq = window.matchMedia('(max-width: 860px)')
@@ -606,6 +766,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  clearChromeIdleTimer()
   mobileViewportMq?.removeEventListener('change', updateMobileViewport)
   window.removeEventListener('resize', bumpMobileLayout)
   document.removeEventListener('fullscreenchange', syncNativeFullscreenState)
@@ -632,6 +793,23 @@ watch(currentPlaying, () => closeDownloadMenu())
   color: #fff;
   background: #0b0d12;
   overflow: hidden;
+}
+.fs-chrome {
+  transition: opacity 0.35s ease, transform 0.35s ease;
+}
+.fs-player.fs-chrome-hidden {
+  cursor: none;
+}
+.fs-player.fs-chrome-hidden .fs-chrome {
+  opacity: 0;
+  pointer-events: none;
+}
+.fs-player.fs-chrome-hidden .fs-controls {
+  transform: translateY(14px);
+}
+.fs-player.fs-chrome-hidden .fs-top-left,
+.fs-player.fs-chrome-hidden .fs-close {
+  transform: translateY(-8px);
 }
 .fs-bg {
   position: absolute;
@@ -784,11 +962,14 @@ watch(currentPlaying, () => closeDownloadMenu())
   overflow-y: auto;
   mask-image: linear-gradient(to bottom, transparent, #000 12%, #000 88%, transparent);
   -webkit-mask-image: linear-gradient(to bottom, transparent, #000 12%, #000 88%, transparent);
-  scrollbar-width: thin;
+  /* 大屏/全屏仍可滚轮滚动歌词，但不显示滚动条 */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
 }
 .fs-lyric-col::-webkit-scrollbar {
-  width: 6px;
+  width: 0;
   height: 0;
+  display: none;
 }
 .fs-lyric-list {
   padding: 30% 12px;
@@ -991,6 +1172,46 @@ watch(currentPlaying, () => closeDownloadMenu())
 .fs-dl-wrap {
   position: relative;
   display: inline-flex;
+}
+.fs-more-wrap {
+  position: relative;
+  display: inline-flex;
+}
+.fs-more-menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 10px);
+  z-index: 30;
+  min-width: 148px;
+  padding: 6px 0;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(20, 22, 30, 0.96);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+}
+.fs-more-item {
+  display: block;
+  width: 100%;
+  padding: 10px 14px;
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+}
+.fs-more-item:hover:not(:disabled),
+.fs-more-item:active:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+}
+.fs-more-item:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.fs-more-qualities {
+  margin: 2px 8px 8px;
+  padding: 4px 0 2px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
 }
 .quality-menu {
   background: rgba(20, 22, 30, 0.96);
@@ -1265,7 +1486,16 @@ watch(currentPlaying, () => closeDownloadMenu())
     height: 26px;
   }
   .fs-btns {
-    gap: 8px 14px;
+    flex-wrap: nowrap;
+    gap: 4px 8px;
+    justify-content: space-between;
+    width: 100%;
+    max-width: 420px;
+    margin: 0 auto;
+  }
+  .fs-more-menu {
+    right: 0;
+    left: auto;
   }
   .fs-volume {
     display: none;

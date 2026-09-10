@@ -49,6 +49,7 @@ function buildStubEntry(filePath) {
     parsedArtist: parsed.artist,
     title: parsed.title,
     artist: parsed.artist,
+    albumArtist: '',
     album: '',
     year: '',
     genre: '',
@@ -75,7 +76,7 @@ function rowToFile(row) {
 }
 
 const CACHE_LIST_FIELDS = [
-  'fileName', 'parsedTitle', 'parsedArtist', 'title', 'artist', 'album',
+  'fileName', 'parsedTitle', 'parsedArtist', 'title', 'artist', 'albumArtist', 'album',
   'year', 'genre', 'comment', 'format', 'duration', 'track',
   'hasPicture', 'hasLyrics',
 ]

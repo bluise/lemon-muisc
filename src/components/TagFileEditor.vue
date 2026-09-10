@@ -12,7 +12,8 @@
         </div>
       </div>
       <label>标题<input v-model="editForm.title" @input="markModified" /></label>
-      <label>歌手<input v-model="editForm.artist" @input="markModified" /></label>
+      <label>歌手<input v-model="editForm.artist" @input="markModified" placeholder="多歌手用 / 分隔" /></label>
+      <label>专辑艺术家<input v-model="editForm.albumArtist" @input="markModified" placeholder="整张专辑署名，可与歌手不同" /></label>
       <label>专辑<input v-model="editForm.album" @input="markModified" /></label>
       <label>年份<input v-model="editForm.year" @input="markModified" /></label>
       <label>风格<input v-model="editForm.genre" @input="markModified" /></label>
@@ -114,6 +115,7 @@
             <div class="preview-info">
               <p><strong>标题</strong> {{ fetchPreviewMeta.title || fetchPreview?.name || '-' }}</p>
               <p><strong>歌手</strong> {{ fetchPreviewMeta.artist || fetchPreview?.singer || '-' }}</p>
+              <p><strong>专辑艺术家</strong> {{ fetchPreviewMeta.albumArtist || '-' }}</p>
               <p><strong>专辑</strong> {{ fetchPreviewMeta.album || '-' }}</p>
               <p v-if="fetchIntent === 'meta' || fetchPreviewMeta.year"><strong>年份</strong> {{ fetchPreviewMeta.year || '-' }}</p>
               <p v-if="fetchIntent === 'meta' || fetchPreviewMeta.genre"><strong>风格</strong> {{ fetchPreviewMeta.genre || '-' }}</p>
@@ -206,6 +208,7 @@ const canConfirmFetch = computed(() => {
   return Boolean(
     fetchPreviewMeta.value.title
     || fetchPreviewMeta.value.artist
+    || fetchPreviewMeta.value.albumArtist
     || fetchPreviewMeta.value.album
     || fetchPreviewMeta.value.year
     || fetchPreviewMeta.value.genre
@@ -247,6 +250,7 @@ function createEmptyForm() {
   return reactive({
     title: '',
     artist: '',
+    albumArtist: '',
     album: '',
     year: '',
     genre: '',
@@ -275,6 +279,7 @@ async function loadFile() {
     editForm.value = reactive({
       title: meta.title || '',
       artist: meta.artist || '',
+      albumArtist: meta.albumArtist || '',
       album: meta.album || '',
       year: meta.year ? String(meta.year) : '',
       genre: meta.genre || '',
@@ -298,6 +303,7 @@ function buildMetaPayload() {
   const meta = {
     title: form.title,
     artist: form.artist,
+    albumArtist: form.albumArtist,
     album: form.album,
     year: form.year,
     genre: form.genre,
@@ -318,6 +324,7 @@ function buildSavedFileRow() {
     filePath: props.filePath,
     title: form.title,
     artist: form.artist,
+    albumArtist: form.albumArtist,
     album: form.album,
     year: form.year,
     genre: form.genre,
@@ -418,9 +425,9 @@ function closeFetchModal() {
 }
 
 function fetchFieldsForIntent(intent) {
-  if (intent === 'cover') return ['cover', 'title', 'artist', 'album', 'year', 'genre', 'comment']
-  if (intent === 'lyric') return ['lyric', 'title', 'artist', 'album', 'year', 'genre', 'comment']
-  return ['title', 'artist', 'album', 'year', 'genre', 'comment']
+  if (intent === 'cover') return ['cover', 'title', 'artist', 'albumArtist', 'album', 'year', 'genre', 'comment']
+  if (intent === 'lyric') return ['lyric', 'title', 'artist', 'albumArtist', 'album', 'year', 'genre', 'comment']
+  return ['title', 'artist', 'albumArtist', 'album', 'year', 'genre', 'comment']
 }
 
 async function doFetchSearch() {
@@ -460,6 +467,7 @@ function applyFetchedMetaToForm(meta) {
   if (!meta || !editForm.value) return
   if (meta.title) editForm.value.title = meta.title
   if (meta.artist) editForm.value.artist = meta.artist
+  if (meta.albumArtist) editForm.value.albumArtist = meta.albumArtist
   if (meta.album) editForm.value.album = meta.album
   if (meta.year) editForm.value.year = String(meta.year)
   if (meta.genre) editForm.value.genre = meta.genre

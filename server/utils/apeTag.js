@@ -25,6 +25,9 @@ export function writeApeMeta(filePath, meta, { decodePicInput, atomicReplaceFile
   if (meta.artist !== undefined) {
     applyText(items, 'Artist', normalizeArtistForWrite(meta.artist).display)
   }
+  if (meta.albumArtist !== undefined) {
+    applyText(items, 'Album Artist', normalizeArtistForWrite(meta.albumArtist).display)
+  }
   applyText(items, 'Album', meta.album)
   applyText(items, 'Year', meta.year != null ? String(meta.year) : undefined)
   applyText(items, 'Genre', meta.genre)

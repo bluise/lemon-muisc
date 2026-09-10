@@ -37,6 +37,10 @@ function writeMp3Meta(filePath, meta) {
     // ID3v2.3 / node-id3：写展示串「A / B」（规范多值需 v2.4 NUL，库支持有限）
     tags.artist = normalizeArtistForWrite(meta.artist).display
   }
+  if (meta.albumArtist != null) {
+    // TPE2：专辑艺术家
+    tags.performerInfo = normalizeArtistForWrite(meta.albumArtist).display
+  }
   if (meta.album != null) tags.album = meta.album
   if (meta.year != null) tags.year = String(meta.year)
   if (meta.genre != null) tags.genre = meta.genre
@@ -89,6 +93,11 @@ async function writeFlacMeta(filePath, meta) {
     const { artists } = normalizeArtistForWrite(meta.artist)
     if (!artists?.length) delete tags.ARTIST
     else tags.ARTIST = artists
+  }
+  if (meta.albumArtist !== undefined) {
+    const { artists } = normalizeArtistForWrite(meta.albumArtist)
+    if (!artists?.length) delete tags.ALBUMARTIST
+    else tags.ALBUMARTIST = artists
   }
   applyField('ALBUM', meta.album)
   applyField('DATE', meta.year)
@@ -271,6 +280,7 @@ function normalizeMetaFields(meta, { keepAlbumSameAsTitle = false } = {}) {
   const title = normalizeTagText(meta.title)
   let album = normalizeTagText(meta.album)
   const artist = joinArtists(normalizeTagText(meta.artist))
+  const albumArtist = joinArtists(normalizeTagText(meta.albumArtist))
   const genre = normalizeTagText(meta.genre)
   const comment = normalizeTagText(meta.comment)
   // 仅在没有明确 ALBUM 标签、且专辑疑似由标题回填时清空
@@ -279,6 +289,7 @@ function normalizeMetaFields(meta, { keepAlbumSameAsTitle = false } = {}) {
     ...meta,
     title,
     artist,
+    albumArtist,
     album,
     genre,
     comment,
@@ -482,6 +493,12 @@ function vorbisArtistDisplay(tags) {
   return joinArtists(raw || '')
 }
 
+function vorbisAlbumArtistDisplay(tags) {
+  const raw = tags?.ALBUMARTIST || tags?.['ALBUM ARTIST']
+  if (Array.isArray(raw)) return joinArtists(raw)
+  return joinArtists(raw || '')
+}
+
 function readFlacNativeTags(filePath) {
   try {
     const stat = fs.statSync(filePath)
@@ -506,6 +523,7 @@ function readFlacNativeTags(filePath) {
     return {
       title: normalizeTagText(Array.isArray(tags.TITLE) ? tags.TITLE[0] : tags.TITLE),
       artist: normalizeTagText(vorbisArtistDisplay(tags)),
+      albumArtist: normalizeTagText(vorbisAlbumArtistDisplay(tags)),
       album: normalizeTagText(Array.isArray(tags.ALBUM) ? tags.ALBUM[0] : tags.ALBUM),
       year: normalizeTagText(Array.isArray(tags.DATE) ? tags.DATE[0] : (tags.DATE || tags.YEAR)),
       genre: normalizeTagText(Array.isArray(tags.GENRE) ? joinArtists(tags.GENRE) : tags.GENRE),
@@ -534,6 +552,7 @@ function readMp3NativeTags(filePath) {
     return {
       title: normalizeTagText(tags.title),
       artist: normalizeTagText(joinArtists(tags.artist)),
+      albumArtist: normalizeTagText(joinArtists(tags.performerInfo)),
       album: normalizeTagText(tags.album),
       year: tags.year != null ? String(tags.year) : '',
       genre: normalizeTagText(tags.genre),
@@ -555,6 +574,7 @@ function mergeNativeMeta(base, native, { lite = false } = {}) {
     ...base,
     title: pick(base.title, native.title),
     artist: pick(base.artist, native.artist),
+    albumArtist: pick(base.albumArtist, native.albumArtist),
     album: pick(base.album, native.album),
     year: base.year || native.year || '',
     genre: pick(base.genre, native.genre),
@@ -661,6 +681,11 @@ function buildMetaFromParsed(metadata, filePath, { includeContent = false } = {}
         || metadata.common.artist
         || '',
     ),
+    albumArtist: joinArtists(
+      (metadata.common.albumartists?.length ? metadata.common.albumartists : null)
+        || metadata.common.albumartist
+        || '',
+    ),
     album: metadata.common.album || '',
     year: metadata.common.year || '',
     genre: metadata.common.genre?.[0] || '',
@@ -683,6 +708,7 @@ function buildEmptyMeta(filePath) {
   return {
     title: '',
     artist: '',
+    albumArtist: '',
     album: '',
     year: '',
     genre: '',
