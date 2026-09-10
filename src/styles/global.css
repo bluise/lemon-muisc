@@ -475,6 +475,85 @@ a.btn-primary.btn-primary:disabled {
 ::-webkit-scrollbar-thumb { background: var(--scrollbar); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-hover); }
 
+/* 全局悬停气泡（接管原生 title） */
+.lemon-tooltip {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 10050;
+  max-width: min(280px, calc(100vw - 16px));
+  padding: 7px 11px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(28, 30, 38, 0.94);
+  color: rgba(255, 255, 255, 0.94);
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 1.45;
+  letter-spacing: 0.01em;
+  box-shadow:
+    0 4px 6px rgba(0, 0, 0, 0.18),
+    0 14px 32px rgba(0, 0, 0, 0.38);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.14s ease-out;
+  will-change: opacity, transform;
+}
+.lemon-tooltip.is-visible {
+  opacity: 1;
+}
+.lemon-tooltip-text {
+  display: block;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+.lemon-tooltip-arrow {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  background: inherit;
+  border: inherit;
+  border-right: none;
+  border-bottom: none;
+  transform: translateX(-50%) rotate(45deg);
+  box-shadow: none;
+}
+.lemon-tooltip[data-place="top"] .lemon-tooltip-arrow {
+  bottom: -5px;
+  border-top: none;
+  border-left: none;
+  border-right: 1px solid rgba(255, 255, 255, 0.12);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+.lemon-tooltip[data-place="bottom"] .lemon-tooltip-arrow {
+  top: -5px;
+}
+html[data-theme="light"] .lemon-tooltip {
+  background: rgba(255, 255, 255, 0.96);
+  color: #1c2333;
+  border-color: rgba(0, 0, 0, 0.1);
+  box-shadow:
+    0 4px 8px rgba(28, 35, 51, 0.08),
+    0 12px 28px rgba(28, 35, 51, 0.14);
+}
+html[data-theme="light"] .lemon-tooltip[data-place="top"] .lemon-tooltip-arrow {
+  border-right-color: rgba(0, 0, 0, 0.1);
+  border-bottom-color: rgba(0, 0, 0, 0.1);
+}
+html[data-theme="light"] .lemon-tooltip[data-place="bottom"] .lemon-tooltip-arrow {
+  border-top-color: rgba(0, 0, 0, 0.1);
+  border-left-color: rgba(0, 0, 0, 0.1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lemon-tooltip {
+    transition: none;
+  }
+}
+
 @media (max-width: 768px) {
   .page-title { font-size: 20px; }
   .page-subtitle { margin-bottom: 14px; }
