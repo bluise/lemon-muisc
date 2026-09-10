@@ -979,9 +979,9 @@ watch(currentPlaying, () => closeDownloadMenu())
 }
 .fs-lyric-line {
   margin: 0;
-  padding: 10px 8px;
-  font-size: 16px;
-  line-height: 1.6;
+  padding: 12px 10px;
+  font-size: 22px;
+  line-height: 1.55;
   color: rgba(255, 255, 255, 0.35);
   transition: color 0.25s, font-size 0.25s;
   max-width: 100%;
@@ -992,7 +992,7 @@ watch(currentPlaying, () => closeDownloadMenu())
 .fs-lyric-line.near { color: rgba(255, 255, 255, 0.55); }
 .fs-lyric-line.active {
   color: #fff;
-  font-size: 22px;
+  font-size: 32px;
   font-weight: 600;
 }
 .fs-lyric-empty {
@@ -1001,7 +1001,7 @@ watch(currentPlaying, () => closeDownloadMenu())
   align-items: center;
   justify-content: center;
   color: rgba(255, 255, 255, 0.4);
-  font-size: 15px;
+  font-size: 18px;
 }
 
 .fs-controls {
